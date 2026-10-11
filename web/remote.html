@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>远程配置 · 爱思办公任务看板</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <style>
+    :root {
+      --brand: #16a34a; --bg: #f5f7fb; --text: #1f2937;
+      --muted: #6b7280; --line: #e5e7eb; --err: #dc2626;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.6;
+    }
+    header { background: var(--brand); color: #fff; padding: 20px 16px 16px; }
+    header .wrap { max-width: 560px; margin: 0 auto; }
+    header h1 { margin: 0; font-size: 18px; }
+    header p { margin: 3px 0 0; font-size: 12.5px; opacity: .85; }
+    .wrap { max-width: 560px; margin: 0 auto; padding: 0 14px 40px; }
+    .card {
+      background: #fff; border: 1px solid var(--line);
+      border-radius: 12px; padding: 18px 16px; margin-top: 14px;
+    }
+    .card h2 { margin: 0 0 8px; font-size: 15.5px; }
+    .card p.desc { margin: 0 0 12px; font-size: 13px; color: var(--muted); }
+    label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+    input[type=text] {
+      width: 100%; padding: 11px 12px; border: 1px solid var(--line);
+      border-radius: 9px; font-size: 15px; background: #fafafa; color: var(--text);
+    }
+    input:focus { outline: none; border-color: var(--brand); background: #fff; }
+    button { font-family: inherit; cursor: pointer; }
+    .btn {
+      padding: 10px 16px; border: none; border-radius: 9px;
+      background: var(--brand); color: #fff; font-size: 14px; font-weight: 600;
+    }
+    .btn:disabled { opacity: .55; cursor: default; }
+    .btn.ghost { background: #eef2f7; color: var(--text); }
+    .full { width: 100%; padding: 12px; font-size: 15px; }
+    .stat { font-size: 13.5px; margin: 6px 0; }
+    .stat b { color: #111; }
+    .stat .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+    .dot.ok { background: var(--brand); }
+    .dot.bad { background: var(--err); }
+    .msg { font-size: 13px; margin: 10px 0 0; display: none; padding: 10px 12px; border-radius: 9px; }
+    .msg.ok { display: block; background: #ecfdf3; color: var(--brand); }
+    .msg.err { display: block; background: #fdecec; color: var(--err); word-break: break-all; }
+    .profile {
+      display: flex; align-items: center; gap: 10px;
+      border: 1px solid var(--line); border-radius: 10px;
+      padding: 10px 12px; margin: 8px 0;
+    }
+    .profile.cur { border-color: var(--brand); background: #f0faf4; }
+    .profile .info { flex: 1; min-width: 0; }
+    .profile .name { font-size: 14px; font-weight: 600; }
+    .profile .meta { font-size: 12px; color: var(--muted); word-break: break-all; }
+    .profile .badge {
+      font-size: 10.5px; background: var(--brand); color: #fff;
+      border-radius: 999px; padding: 1px 8px; margin-left: 6px; vertical-align: 1px;
+    }
+    .empty { font-size: 13px; color: var(--muted); margin: 8px 0; }
+    .hint {
+      background: #f0f5ff; border-radius: 10px; padding: 10px 12px;
+      font-size: 12.5px; color: #3b5aa0; margin-top: 10px; line-height: 1.7;
+    }
+  </style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>远程配置</h1>
+    <p>爱思办公任务看板 · 手机上改推送设置，改完立即生效</p>
+  </div>
+</header>
+<div class="wrap">
+  <div class="card">
+    <h2>邮箱推送状态</h2>
+    <div id="stat-box"><p class="desc">加载中…</p></div>
+    <div class="msg" id="msg"></div>
+  </div>
+
+  <div class="card">
+    <h2>收件邮箱</h2>
+    <p class="desc">推送邮件（配对码/地址/远程配置链接）发到这个邮箱。改完立即生效，并马上重发一封最新连接信息。</p>
+    <label>收件邮箱（多个用逗号隔开；直接编辑，输过的地址点输入框可下拉快选，选中即切换）</label>
+    <input type="text" id="in-to" list="to-history" placeholder="you@example.com" autocomplete="off" />
+    <datalist id="to-history"></datalist>
+    <div style="margin-top:12px;"><button class="btn full" id="btn-to" onclick="saveTo()">保存收件邮箱</button></div>
+  </div>
+
+  <div class="card">
+    <h2>发件配置档案</h2>
+    <p class="desc">哪套 SMTP 服务出问题就切另一套（档案在电脑端向导里保存）。切换后立刻重发最新连接信息。</p>
+    <div id="profile-list"></div>
+    <button class="btn ghost full" id="btn-test" onclick="sendTest()" style="margin-top:6px;">📨 用当前配置发一封测试邮件</button>
+  </div>
+
+  <div class="hint">
+    🔒 本页为受限远程配置：只能改收件人、切换档案、发测试邮件。
+    修改 SMTP 服务器/授权码等敏感信息，请在电脑端打开
+    <code>http://127.0.0.1:8787/setup.html</code>（仅限本机）。
+    链接含管理令牌，请勿转发给他人；桥接重启后令牌刷新，以最新邮件为准。
+  </div>
+</div>
+
+<script>
+  const TOKEN = new URLSearchParams(location.search).get('t') || '';
+  const $ = (s) => document.querySelector(s);
+  let st = null;
+
+  function showMsg(text, ok) {
+    const el = $('#msg');
+    el.className = 'msg ' + (ok ? 'ok' : 'err');
+    el.textContent = text;
+    if (ok) setTimeout(() => { el.className = 'msg'; }, 4000);
+  }
+
+  async function api(path, body) {
+    // 令牌统一拼在 URL 上（GET 没有 body，POST 也兼容）——漏拼会导致 401
+    const sep = path.includes('?') ? '&' : '?';
+    const res = await fetch(path + sep + 't=' + encodeURIComponent(TOKEN), {
+      method: body ? 'POST' : 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(Object.assign({ t: TOKEN }, body)) : undefined
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((data.error && data.error.message) || `请求失败（${res.status}）`);
+    return data;
+  }
+
+  function render() {
+    const m = st.mailer;
+    $('#stat-box').innerHTML =
+      `<div class="stat"><span class="dot ${m.configured ? 'ok' : 'bad'}"></span>${m.configured ? '已启用' : '未配置完整'}</div>` +
+      `<div class="stat">发件服务：<b>${m.smtpHost || '—'}:${m.smtpPort}</b>（${m.smtpSecure ? 'SSL' : 'STARTTLS'}）</div>` +
+      `<div class="stat">发件账号：<b>${m.user || '—'}</b></div>` +
+      `<div class="stat">收件邮箱：<b>${m.to || '—'}</b></div>` +
+      `<div class="stat">当前档案：<b>${m.currentProfile || '—'}</b></div>`;
+    $('#in-to').value = m.to || '';
+    // 收件地址历史下拉：当前地址 + 历史去重
+    $('#to-history').innerHTML = [m.to, ...(m.toHistory || [])]
+      .filter((v, i, a) => v && a.indexOf(v) === i)
+      .map((v) => `<option value="${v.replace(/"/g, '&quot;')}">`).join('');
+
+    const box = $('#profile-list');
+    if (!m.saved.length) {
+      box.innerHTML = '<p class="empty">还没有保存过发件配置档案。在电脑端向导里「💾 保存当前为档案」后，这里就能一键切换。</p>';
+      return;
+    }
+    box.innerHTML = m.saved.map((p) => {
+      const cur = p.name === m.currentProfile;
+      return `<div class="profile ${cur ? 'cur' : ''}">` +
+        `<div class="info"><div class="name">${p.name}${cur ? '<span class="badge">当前</span>' : ''}</div>` +
+        `<div class="meta">${p.smtpHost}:${p.smtpPort} · ${p.user}${p.hasPass ? '' : ' · ⚠️无授权码'}</div></div>` +
+        (cur ? '' : `<button class="btn ghost" onclick="applyProfile('${p.name.replace(/'/g, "\\'")}')">应用</button>`) +
+        '</div>';
+    }).join('');
+  }
+
+  async function refresh() {
+    try {
+      st = await api('/api/remote/status');
+      render();
+    } catch (e) {
+      document.body.innerHTML =
+        `<header><div class="wrap"><h1>远程配置</h1></div></header>` +
+        `<div class="wrap"><div class="card"><p class="desc" style="color:var(--err)">⚠️ ${e.message}</p>` +
+        `<p class="desc">若服务刚重启过，请用最新推送邮件里的链接打开本页。</p></div></div>`;
+    }
+  }
+
+  async function saveTo() {
+    const btn = $('#btn-to');
+    btn.disabled = true;
+    try {
+      const r = await api('/api/remote/save-to', { to: $('#in-to').value.trim() });
+      st = r;
+      render();
+      showMsg('✅ 收件邮箱已保存，最新连接信息正在重发到新邮箱', true);
+    } catch (e) { showMsg('❌ ' + e.message, false); }
+    btn.disabled = false;
+  }
+
+  // 从下拉选中历史地址（或输入完完整历史地址）即自动切换，无需再点保存
+  $('#in-to').addEventListener('change', () => {
+    const v = ($('#in-to').value || '').trim();
+    const hist = (st && st.mailer && st.mailer.toHistory) || [];
+    if (v && v !== st.mailer.to && hist.includes(v) && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) {
+      saveTo();
+    }
+  });
+
+  async function applyProfile(name) {
+    if (!confirm(`切换发件配置到「${name}」？切换后立即重发最新连接信息。`)) return;
+    try {
+      const r = await api('/api/remote/apply-profile', { name });
+      st = r;
+      render();
+      showMsg(`✅ 已切换到「${name}」`, true);
+    } catch (e) { showMsg('❌ ' + e.message, false); }
+  }
+
+  async function sendTest() {
+    const btn = $('#btn-test');
+    btn.disabled = true;
+    btn.textContent = '发送中…';
+    try {
+      await api('/api/remote/test', {});
+      showMsg('✅ 测试邮件已发送，请到收件邮箱查收', true);
+    } catch (e) { showMsg('❌ 测试失败：' + e.message, false); }
+    btn.disabled = false;
+    btn.textContent = '📨 用当前配置发一封测试邮件';
+  }
+
+  refresh();
+</script>
+</body>
+</html>

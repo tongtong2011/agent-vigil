@@ -1,0 +1,20 @@
+{
+  "name": "office-task-mobile-companion",
+  "version": "0.1.0",
+  "private": true,
+  "description": "爱思办公手机协同端 MVP 实验版：局域网只读查看电脑端任务进度（非官方、免费、开源）",
+  "main": "bridge.js",
+  "scripts": {
+    "start": "node bridge.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "nodemailer": "^10.0.15",
+    "qrcode": "^1.5.4",
+    "ws": "^8.18.0"
+  },
+  "license": "MIT"
+}
