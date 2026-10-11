@@ -1,6 +1,6 @@
 {
-  "name": "爱思办公任务看板",
-  "short_name": "爱思看板",
+  "name": "agent-vigil",
+  "short_name": "agent-vigil",
   "description": "局域网只读查看电脑端任务进度的协同看板（非官方）",
   "lang": "zh-CN",
   "dir": "ltr",

@@ -1,0 +1,64 @@
+# AgentVigil
+
+> A mobile task board + email alert layer for AI agents, aggregating agent tasks across every harness into one board and one inbox.
+
+## Overview
+
+AgentVigil is a standalone Node.js bridge service (NOT a plugin). It reads agent tasks from the local AI backend of the harness running on the same computer, serves a mobile PWA task board, and pushes alerts/digests over email. It does not create tasks and does not orchestrate agents — it observes them and calls the human back (email + mobile) when attention is needed.
+
+- Entry: `bridge.js` (`npm install && node bridge.js`, default `0.0.0.0:8787`)
+- Runtime: Node.js >= 18, dependencies: express, ws, nodemailer, qrcode
+- Baseline harness: 爱思办公 (Agnes Office) desktop app via its local AI backend `agnesd` (goose framework, ACP protocol)
+- Multi-harness: planned in V4 (plugin-style adapters); board/email pipeline is harness-agnostic by design
+
+## Key concepts
+
+- **Harness**: any tool that runs AI agent tasks. Current: Agnes Office (`agnesd`). Planned: see `V4多渠道接入需求与设计文档.md`.
+- **Pairing**: QR code shows LAN/public URL + 6-digit pairing code; code exchanges for a device token (`X-Device-Token` header). Pairing code lives in memory only (TTL 5–120 min, reusable within TTL); bridge restart invalidates device tokens; new codes are auto-emailed.
+- **Task states (alert engine, `lib/alerts.js`)**: exactly four, judged from the latest interaction round only:
+  - `running` 正在执行 — activity within 90s or running steps exist
+  - `ended` 执行完成 — last tool call succeeded, or last AI reply is plain-text conclusion
+  - `failed` 异常 — latest result errored (last tool call failed / tool stream tail failed)
+  - `waiting` 待确认 — latest message is from the user with no AI reply since (conversation blocked)
+  - Blocking set = `failed` + `waiting`. Blocking alert fires immediately per watched task; no repeat bombing within the same blocking episode; state resets on recovery. Detection cadence: fixed 60s. Watchlist source of truth is the phone's localStorage, mirrored into `config.json` `alerts.watchlist`.
+- **Digest**: every `alerts.digestIntervalMinutes` (10–240, default 60), watched tasks are compiled into a table email.
+- **Tunnel**: Cloudflare quick tunnel (auto-download cloudflared) or named tunnel (fixed domain, idempotent init: reuses tunnel, fixes CNAME, writes Public Hostname route). Falls back to LAN-only on failure.
+- **Read-only iron rule**: only `initialize` / `session/list` / `session/load` are called on agnesd. The single write exception is mobile messaging (`session/prompt`, equivalent to typing in the desktop input box), gated by paired device token + rate limit (10/min) + config kill switch.
+
+## Architecture
+
+```
+agnesd (ACP) <- lib/acp.js (auto-discover port + read secret from process memory via lib/get-agnes-secret.ps1)
+             <- lib/official.js (session list -> conversation-round aggregation)
+bridge.js    - static hosting of web/ PWA
+             - lib/localApi.js   GET /health, /api/tasks, /api/tasks/:id, POST /api/tasks/:id/messages
+             - lib/setupApi.js   /api/setup/* (setup wizard, 127.0.0.1 only, remote = 403)
+             - lib/remoteApi.js  mobile remote config (email-token auth: change recipient / switch sender profile / test mail)
+             - lib/wsHub.js      /ws WebSocket push (task_update / step_update), token check + heartbeat
+             - lib/pair.js       QR pairing (code -> device token)
+             - lib/tunnel.js     Cloudflare tunnel lifecycle
+             - lib/mailer.js     SMTP push (HTML email with inline QR); lib/smtp.js low-level client
+             - lib/alerts.js     V3 watchlist + blocking alerts + scheduled digest
+             - lib/wecom.js      optional WeCom (企业微信) push
+web/         - PWA: index.html (connect/list/detail + message input), setup.html (wizard), remote.html, sw.js shell cache
+```
+
+- Real-time: WebSocket event-driven + 8s fallback polling; exponential backoff reconnect; no re-render on unchanged content.
+- No demo data: board is empty when the harness is not running; three-place warning (console log / push email / mobile banner), auto-recovers when agnesd starts.
+
+## Configuration (config.json, gitignored — never commit)
+
+`listenHost/port`, `acp.*` (autoDiscover/port/secret), `timeoutMs`, `pollIntervalMs`, `tunnel.*` (enabled/cloudflaredPath/mode/hostname/tunnelToken), `pair.codeTtlMinutes`, `messages.enabled`, `mailer.*` (smtp host/port/user/pass/to, saved sender profiles with >=2 failover, toHistory), `wecom.*`, `setup.done`, `alerts.*` (watchlist/alertEnabled/digestEnabled/digestIntervalMinutes/digestTitle/alertPrefix).
+
+Secrets (SMTP auth codes, tunnel tokens) live only in local `config.json` and `敏感配置备份.md` — both gitignored, never send to frontend, never commit.
+
+## Docs
+
+- `docs/00-文档导航.md` — documentation index and public-level ledger
+- `docs/启动文档.md` — quick start and troubleshooting
+- `docs/常见问题.md` — full FAQ (connection, named-tunnel 3-segment diagnosis, push/alert triage)
+- `docs/配置说明.md` — full config.json reference + data source & access boundary
+- `docs/邮箱推送配置.md` — SMTP auth-code guide (QQ/163/Gmail), sender profiles & failover
+- `CHANGELOG.md` — change retrospectives with root causes
+- `V4多渠道接入需求与设计文档.md` — multi-harness adapter design
+- `llms-full.txt` — this document + all user docs aggregated (single-file, copy-paste safe for agents)

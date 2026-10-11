@@ -1,6 +1,6 @@
 'use strict';
 /**
- * 爱思办公手机协同端 · 桥接服务入口（MVP 实验版，只读）
+ * agent-vigil · 桥接服务入口（MVP 实验版，只读）
  *
  * 运行：npm install && node bridge.js（默认监听 0.0.0.0:8787）
  * 启动后在控制台展示二维码（含地址 + 一次性配对码），手机扫码或手动输入即可连接。
@@ -374,7 +374,7 @@ async function main() {
 
     console.log('');
     console.log('================================================');
-    console.log('   爱思办公任务看板 · 桥接服务（只读 MVP）');
+    console.log('   agent-vigil · 桥接服务（只读 MVP）');
     console.log('================================================');
     console.log(`  本机地址 : ${base}`);
     console.log(`  配对码   : ${code}（第 ${codeSeq} 次生成 · ${ttlMin} 分钟内有效，仅可使用一次）`);
