@@ -1,7 +1,7 @@
 {
-  "name": "agent-vigil",
-  "short_name": "agent-vigil",
-  "description": "局域网只读查看电脑端任务进度的协同看板（非官方）",
+  "name": "AgentVigil",
+  "short_name": "AgentVigil",
+  "description": "AgentVigil — AI Agent 任务移动看板与邮件告警，跨 harness 聚合（非官方）",
   "lang": "zh-CN",
   "dir": "ltr",
   "start_url": "/",

@@ -1,9 +1,69 @@
 # 变动回溯文档（CHANGELOG）
 
 > 用途：记录每次影响使用体验或行为的关键变动，便于后续回溯排查。
-> 版本包命名规则：`爱思办公手机协同端-VX.Y.Z.zip`（放在项目同级目录）。
+> 版本包命名规则：`agent-vigil-VX.Y.Z.zip`（放在项目同级目录）。
 
 ---
+
+## V4.1.0（2026-10-12）
+
+### 变动二十八：WorkBuddy 消息回写修复（CLI 独立入口错配，发送真实可用）
+
+- **问题**：WorkBuddy 详情页「发送」实际从未成功过 — 探测到的 CLI 入口是 `bin/codebuddy`（bin 脚本），它 `require('../dist/codebuddy')` 的主包在 app.asar 打包态内，桥接用独立 node.exe spawn 必崩 `MODULE_NOT_FOUND`；而 bin 脚本的 `--version` 照常打印（2.161.0），版本探测无法识别残缺，探针误判「CLI 可用」。
+- **修复**：`_probeCli` 候选次序改为「用户配置 cliPath > `dist/codebuddy-lite-wb.mjs`（桌面端真正的独立完整 bundle）> `bin/codebuddy`」；`sendMessage` 对来自 models.json 的裸模型 id 自动补 `custom-local:` 前缀（CLI 侧自定义供应商条目带此前缀，裸 id 会按内置模型解析报 503/未知模型）。
+- **验证**（2026-10-17 实测）：lite bundle 独立运行 ✓；headless 首轮建会话 ✓；`--resume` 二轮续聊 ✓；转录 JSONL 双轮内容 ✓；离线探针指向 lite 入口 ✓；桥接重启后三渠道在线。临时测试会话/目录已全部清理。
+- 前提保持：WorkBuddy 桌面端需运行（进程门禁）；模型走 models.json 自定义供应商。
+
+### 变动二十七：新增 Trae 渠道（WorkBuddy 同款本地文件直读模式）
+
+**背景**：多渠道插件化体系接入第三个渠道。取证结论：Trae CN（字节系 AI IDE）的会话正文存于 `%APPDATA%\Trae CN\ModularData\ai-agent\database.db`，文件头为加密数据（非 SQLite 明文）且被运行中进程独占锁定，不可直读；IDE 无本地指令注入通道。唯一稳定可读的本地数据源 = 记忆子系统转录（`~/.trae-cn/memory/projects/<项目转义目录>/<YYYYMMDD>/session_memory_<sessionId>.jsonl`，逐回合追加，无需鉴权）。
+
+- 新增 [lib/adapters/trae.js](lib/adapters/trae.js)：`TraeAdapter extends BaseAdapter`，WorkBuddy 同款读盘策略（mtime/size 缓存 + 1 秒扫描节流 + fs.watch 递归监听防抖 onChange + tasklist 进程探测 30 秒缓存）
+  - 任务 = 会话（sessionId 跨天聚合，全量合并读取）；**标题 = 最新一轮 intent**（用户在 IDE 里改的会话名仅存加密主库与云端，本地明文取不到；最新指令随任务推进自动更新，2026-10-12 用户定稿）
+  - **cwd/group 工作区池精确映射**：workspaceStorage 各 hash 目录下的 workspace.json folder 字段 + 全局 state.vscdb 明文页 file:/// URI → 真实路径池，按转义规则反查；未命中才退回近似还原（`-` 歧义不可逆，仅展示用）
+  - 详情对话流：intent→user / outcome→agent 逐回合成对入列；actions[] 摊平为 done 步骤
+  - **两态简化**：摘要记录异步落盘、不携带执行状态字段，failed/waiting 不可判定 → 仅 running（应用在线 + mtime<90 秒活动窗）/ done 两态；该渠道不触发即时告警，汇总邮件正常参与
+  - 只读渠道：`canSend=false`，sendMessage 抛 `UNSUPPORTED`（501）
+- 注册表接入：[lib/adapters/index.js](lib/adapters/index.js) 注册 `trae` 渠道（数据根可经 `channels.trae.dataDir` 覆盖）；[lib/config.js](lib/config.js) 默认块 `trae:{enabled:true, alertEnabled:false, digestEnabled:false, alertPrefix:''}`
+- 前端零改动：配置页渠道 chip / 看板 Tab / watchlist / 告警前缀均按注册表动态渲染
+- 测试：[tests/verify-trae-adapter.js](tests/verify-trae-adapter.js)（临时 fixture + 进程门禁关/开双路径 + 跨天聚合 + 两态 + watch 回调）
+
+### 变动二十六：配置页重构为 Tab 式配置中心（每页独立保存 + 渠道勾选条动态配置块）
+
+**背景**：变动二十五把渠道级配置平铺在向导第 4 步，用户反馈：未来内置 10~20 个渠道时配置页会过长；且「所有配置集中到最后一步统一保存」交互怪异。定稿口径：整页改为 **Tab 式配置中心**（首页=介绍/导航，每个大配置项一个独立页签、各自保存按钮分开保存）；渠道区拆两个页签——「公共配置」（全渠道统一节拍）+「渠道独立配置」（紧凑勾选条，**勾上某渠道才动态出现该渠道的配置块**，不勾不出现）。用户拍板：渠道拆两页签；配对码有效期/条数上限独立「看板与配对」页签。
+
+- [web/setup.html](web/setup.html) 全量改版（纯前端，后端 [lib/setupApi.js](lib/setupApi.js) 白名单部分提交特性天然支持，零改动）：
+  - 5 步向导 + 顶部进度条 → **6 页签 Tab 导航**：首页（介绍 + 当前状态总览卡 + 连接手机二维码卡 + 快捷入口）/ 邮箱推送（原第 2 步 + 企业微信 advanced 移入）/ 公网访问（原第 3 步）/ 公共配置（汇总间隔 + 汇总标题，空标题拦截回填逻辑随迁）/ 渠道独立配置（原渠道区）/ 看板与配对（配对码有效期 + 列表条数上限滑块）
+  - 每个配置页签底部**独立保存按钮**：`saveAll()` 拆为 `saveMailer / saveTunnel / saveAlertsCommon / saveChannels / saveBoardPair` 五个函数，各自只提交对应 patch 块（共用 saveTab helper：save → done → 页签内提示）；保存后标记 pairStale，回首页自动刷新二维码/配对码
+  - 渠道独立配置页：渠道渲染为**紧凑 chip 勾选条**（小复选框胶囊排一行可换行，20 个渠道只占两三行）；勾选变化即时增删下方 `.ch-block`（汇总/报警开关 + 前缀输入）；渠道值存 JS 态 `chState`，取消再勾不丢已编辑值；「至少勾一个」拦截保留
+  - 首页新增状态总览（邮箱/隧道/已接入渠道/追踪任务数四行 stat，消费 /api/setup/status）与连接手机卡（自原第 5 步 done-area 移植，pair-info 改为进入首页时惰性拉取）
+- 页面标题「配置向导」→「配置中心」；.steps 进度条 CSS 移除，新增 .tabs/.chip 样式
+- 未动：remote.html、手机端、隧道 provision、发件档案、测试邮件等逻辑原样平移
+
+### 变动二十五：渠道级配置改造（复选框启停 + 开关/前缀按渠道 + 间隔/标题/上限全局统一）
+
+**背景**：V4 多渠道上线后配置粒度混乱——渠道启停只能手改 config.json、汇总/报警开关不分渠道，而汇总间隔和列表上限却按渠道各存一份。用户定稿口径：渠道启停在配置页用**复选框勾选**；「任务汇总总开关」「单任务报警开关」「报警标题前缀」**按渠道独立配**；「汇总间隔」「汇总标题」「看板列表条数上限」**全渠道统一配一份**；追踪清单维持按渠道分开。
+
+- 配置模型（[lib/config.js](lib/config.js)）
+  - 渠道级收窄为四键：`enabled / digestEnabled / alertEnabled / alertPrefix`；`digestIntervalMinutes / digestTitle` 归全局 alerts，`listLimit / listLimitMax` 归新全局块 `board`
+  - **旧 config.json 自动迁移**：load 时旧渠道级 listLimit/listLimitMax 取最大值并入 board（真实存量 workbuddy 1000 → board.listLimit=1000，行为不变）；agnes 渠道级间隔/标题仅在 alerts 顶层未显式写时提升；save 落盘前逐渠道 prune 旧键——旧配置随任意一次保存完成清洗
+  - agnes 回退机制保持：channels.agnes 开关/前缀未显式配置时回退 alerts 顶层（老配置零迁移）
+- 渠道启停热应用（[lib/adapters/index.js](lib/adapters/index.js)）：适配器始终注册（watchlist 条目不丢、临时停用不清追踪清单），`isEnabled()` 实时读 config；新增 `applyChannels()`——新启用渠道即席初始化接入、停用渠道清快照 + close 并记日志；未启用渠道不预热/不进 /health/告警整体跳过
+- 告警节拍统一（[lib/channels.js](lib/channels.js) / [lib/alerts.js](lib/alerts.js)）：合并汇总节拍 = 全局 `alerts.digestIntervalMinutes`（不再取各渠道最小值）；`checkBlocking / sendDigestAll` 按「渠道启用 + 该渠道开关」双重过滤，停用渠道不出节不报警
+- 配置向导第 4 步改版（[web/setup.html](web/setup.html)）：顶部「接入渠道」复选框组（默认勾爱思办公，可勾多个，至少勾一个，全部取消拦截保存）；每渠道子块 = 汇总开关 / 报警开关 / 标题前缀（未勾选渠道子块隐藏）；全局区 = 统计间隔、汇总标题、配对码有效期、看板列表条数上限滑块；保存白名单同步收窄（[lib/setupApi.js](lib/setupApi.js)）
+- 手机远程配置页同步（[lib/remoteApi.js](lib/remoteApi.js) / [web/remote.html](web/remote.html)）：告警卡片同样按渠道分块 + 全局项；非凭据白名单原则不变
+- 看板 Tab「勾几个显几个」（[web/app.js](web/app.js)）：推翻「≥2 才渲染 Tab」——只接入爱思办公也显示单 Tab；未启用渠道 /health 不返回 → Tab 自然消失。SW 缓存 bump v21（lib/localApi.js shellVer ↔ web/app.js SHELL_VER ↔ web/sw.js CACHE 三处同步）
+- 离线验证（[tests/verify-digest-merge.js](tests/verify-digest-merge.js) 7 组 + 新增 [tests/verify-config-migration.js](tests/verify-config-migration.js) 4 组）：合并一封两节 / 全局节拍（渠道级旧键 999 失效）/ down 节 / 基线独立 / 来源徽章 / 不重复轰炸 / **渠道停用隔离（报警不发 + 仅 agnes 出节）**；迁移沙箱断言——board 提升 / agnes 旧键提升 / save 落盘清洗 / 未知渠道前向兼容（全程系统临时目录构造沙箱，绝不碰真实 config.json）
+- 实测：9 个后端 + 4 个前端文件 node --check 通过；重启后 /health shellVer=v21 只含启用渠道；browser_use 实测——第 4 步复选框/子块/全局项渲染、取消勾选 WorkBuddy 子块隐藏、保存热生效（/health 只剩 agnes、日志「渠道已停用：WorkBuddy」）；board.listLimit=1000 经滑块端到端恢复
+- 踩坑：验证期浏览器子代理加载了被旧 Service Worker 缓存的 setup.html 旧版页面（旧页 saveAll 发旧 patch 使 board.listLimit 短暂回退 100，经 UI 重设 1000 恢复）——shellVer 自愈机制只覆盖看板（app.js），setup.html/remote.html 独立页面无自愈；测试此类页面需带 query 参数绕缓存并先注销 SW
+
+### V4.1.0 踩坑实录（开发期问题 → 解决实践）
+
+| # | 问题 | 根因 | 解决 |
+|---|---|---|---|
+| 1 | 浏览器测试 setup.html 看不到新功能，且一次"保存"把 board.listLimit 从 1000 打回 100 | 旧 Service Worker 以 cache-first 持续下发旧版 setup.html；旧页 saveAll 发旧 patch（无 board 块、带渠道级 listLimit），deepMerge 覆盖迁移值后又被 prune | URL 带 query 绕缓存 + 注销 SW 清 caches 重测；shellVer 自愈只护看板，独立配置页无此机制——升级发布后提示用户先开一次看板 |
+| 2 | 迁移值随浏览器旧页保存丢失 | 旧 patch 经白名单过滤后仍会改写 channels，触发 load 迁移重算（此时渠道级 listLimit 已被旧值覆盖） | 迁移设计本就「随任意一次保存收敛」，数据无损坏（行为回默认 100）；经 UI 滑块重设 1000 端到端恢复并顺带验证 board 白名单 |
+
 
 ## V3.1.0（2026-10-10）
 
@@ -44,6 +104,129 @@
 - 每次推送配对码邮件时打印：`[配对码邮件] 码=xxx seq=N 发送时间=YYYY/MM/DD HH:mm:ss TTL=N分钟 预计过期=... 地址=...`
 - 用途：核对 codeTtlMinutes 是否真实生效（下一封自动刷新邮件应比上一封晚整 TTL，重启另算）——重启会作废旧码立即发新码，与 TTL 无关
 
+### 变动十六：手机远程配置绿档化（告警/配对有效期/发消息/隧道均可在手机改）
+
+**背景**：远程页原本只能改收件人/切档案/发测试邮件，调个告警开关或隧道还得跑回电脑；但 SMTP 授权码、隧道令牌等凭据绝不能出 127.0.0.1。按「绿档搬、红档留」划界。
+
+- 新增 `POST /api/remote/save-settings`：严格白名单，仅接收 alerts（双开关/间隔 10~240 限幅/标题 50 字/前缀 30 字）、pair.codeTtlMinutes（5~120）、messages.enabled、tunnel（enabled/mode）；**hostname/tunnelToken/cloudflaredPath 等字段收到即丢弃**，注入实测 `tunnelToken=HACKED123` 不影响原值
+- status 扩展回显 settings 块；隧道令牌永不回传，只给 `canNamed`（是否已初始化）布尔；切 named 前服务端二次校验本机已有令牌+域名，未初始化返回 `NAMED_NOT_READY`（初始化仍须电脑端向导第 3 步）
+- 保存后直接调向导同款 `applySetupChanges()` 热应用：mailer/wecom 重建、`pair.setTtlMinutes`、隧道签名比对重启、`alerts.applyConfig` 定时器重建
+- remote.html 新增三张卡：任务告警与汇总（switch 开关+间隔 select+标题输入）、访问与配对（TTL 滑块+发消息开关）、公网隧道（启用开关+快速/固定域名分段+当前地址）；底部安全 hint 同步更新
+- named 模式 tunnel.url 不回填时状态接口用 `https://<hostname>` 补全，避免手机误显「隧道未就绪」
+- 验证：status 回显 9 字段正确、幂等保存 ok、凭据注入被忽略、无令牌 401、重启后本地/公网 health 双 200、ACP 真实数据在线
+- 踩坑：Edit 写入时该行闭合引号莫名丢失（磁盘字节实测缺 `'`，编辑器渲染却正常），`node --check` 抓到 `Invalid token`，以字节级替换修复——此后 JS 改动一律先过 `node --check`
+
+### 变动十七：V4 启动 · AgentAdapter 公共接口 + WorkBuddy 适配器（本地转录直读）
+
+**背景**：V4 目标「一个桥接盯多个 AI Agent」。Phase 1 落地适配器层：抽象统一接口 + 接入第二个渠道 WorkBuddy（此前已验证其 Remote Control 网关全部 401，唯一可行路径=本地文件直读）。
+
+- `lib/adapters/base.js`：BaseAdapter 接口约定（channel/displayName/init/close/health/describe/listTasks/getTask/sendMessage/setOnChange/taskCount）+ 统一任务格式（id/title/status 四态/progress/steps/messages/cwd/group）+ 公共工具（mapStepStatus、deriveTaskStatus、calcProgress、isoMs、cleanUserText）。四态语义与 alerts.js 对齐：running（90 秒内活跃）> failed（最新一轮尾部工具失败）> waiting（最后一条是用户消息）> done
+- `lib/adapters/agnes.js`：爱思办公适配器，委托包装现有 OfficialClient（零回归，验证接口表达力：列表/详情/发消息/健康/实时回调全部透传）
+- `lib/adapters/workbuddy.js`：WorkBuddy 适配器（只读）——数据根 `%USERPROFILE%\.workbuddy`；列表按 mtime 缓存摘要（每文件只读头尾各 96KB，390 个会话实测 1ms）；详情全量解析 JSONL（ai-title 标题+cwd、fc↔fcr 靠 callId 关联成步骤流、message→对话流、无工具时用 tasks/<sid>/N.json todo 充当步骤、assistant-display 智能体名）；健康=WorkBuddy.exe 进程存活（30 秒缓存）；fs.watch 递归监听转录追加实时回调；sendMessage 明确抛 UNSUPPORTED（网关无写路径）。关键清洗：用户消息剥离 `<system-reminder>` 注入块并解出 `<user_query>` 内层真实输入（标题污染修复）
+- `lib/adapters/index.js`：注册表工厂（agnes 默认 + workbuddy 自动发现数据根即接入，channels.workbuddy.enabled=false 可关）；单渠道 init 失败降级不拖垮其他渠道
+- 最小接线：bridge.js 启动时 initAll + SIGINT closeAll；/health 新增 `channels` 汇总（[{channel,displayName,ok,describe,tasks}]）。看板 Tab/告警多渠道/watchlist 二元组属 Phase 2/3，本次不动
+- 实测：390 个 WorkBuddy 历史会话（四态分布合理 done94/waiting6）、详情 82 消息/124 步骤 25ms、agnes 32 会话回归正常、本地+公网 health 双 200
+- 踩坑：①块注释里写 `projects/*/*.jsonl` 中的 `*/` 会提前终止注释（node --check 拦截）②Write 工具对本文件内容反复反序列化失败，PowerShell here-string 落盘解决
+
+### 变动十八：V4 Phase 2 · 配置分层（channels 分渠道告警 + watchlist 二元组）
+
+**背景**：Phase 1 让多个渠道共用一套告警配置，追踪任务也只有裸 id（无法区分渠道）。Phase 2 把「告警策略」与「追踪清单」全部按渠道分层，且对存量爱思办公用户做到配置零迁移、邮件外观零回归。
+
+- `lib/channels.js`（新增，单一真源）：`channelCfg(cfg,ch)` 解析渠道生效策略——**agnes 的 channels 字段留空即回退 V3 的 `alerts` 顶层旧生效源**，其他渠道读 `channels.<ch>` 独立值；`digestTitleFor/alertPrefixFor` 处理默认文案——agnes 默认仍为「任务汇总邮件」「单任务报警-」（无标签），新渠道留空时自动带 `[渠道名]` 前缀（如 `[WorkBuddy] 任务汇总邮件`）；`normalizeWatchlist` 把清单规范成二元组 `{channel,taskId}`——**旧的纯 id 字符串/无 channel 对象读取时一律归一成 agnes，旧 config 无需迁移**，去重 + 单渠道 50 / 总量 200 上限 + 未知渠道过滤
+- `lib/config.js`：DEFAULTS 新增 `channels`（agnes 仅 enabled；workbuddy enabled 默认 true、两个告警开关默认 false、间隔 60 分钟、文案留空）；`load()` 对 channels **逐层合并**（浅 Object.assign 会让 file 里的单个渠道对象整体替换默认、丢掉其余默认字段）；file 中未知新渠道键原样保留（前向兼容）
+- [lib/alerts.js](lib/alerts.js) 多渠道化：内部清单改二元组；`classify(channel,id)` 按渠道取适配器（兼容旧单参签名=agnes），四态判定同时适配 agnes（工具挂消息 `tools`）与文件型渠道（独立 `steps`，兼容 assistant/agent 两种角色名）；阻塞检测遍历全渠道、**按渠道读 alertEnabled**，去重键与告警态恢复键改 `${channel}:${taskId}`；定时统计**按渠道独立定时器**（间隔可不同，开关热生效即重建），变化指纹按渠道分区互不串扰；数据源全不可用的异常邮件**按渠道分别去重**（_downNotified 集合）；`sync` 支持两种形态——全量二元组 / `{channel, ids:[...]}` 只覆盖单渠道（保留其他渠道条目）；`status()` 旧字段保留（agnes 视角）并新增 `channels` 明细
+- [lib/mailer.js](lib/mailer.js)：sendAlert/sendDigest 新增可选 `source`（渠道名徽章），sendAcpDown 按 source 切换「爱思办公专有文案/通用渠道文案」两套模板；**agnes 不传 source，三封邮件的标题与正文与 V3 完全一致（零回归）**
+- [lib/localApi.js](lib/localApi.js)：tasks 列表/详情/发消息全部支持 `channel` 参数（query/body，缺省 agnes；未知渠道 400 CHANNEL_UNKNOWN），响应带 channel/displayName；watchlist 全量返回二元组、`?channel=` 返回该渠道纯 id；错误映射新增 AdapterError（UNSUPPORTED=501，WorkBuddy 只读发消息实测 501）
+- 配置白名单：[lib/setupApi.js](lib/setupApi.js)（本机向导）与 [lib/remoteApi.js](lib/remoteApi.js)（手机远程页）的 save/status 支持 `channels.<ch>` 的非凭据字段（enabled/两个开关/间隔 10-240 限幅/标题 slice50/前缀 slice30），**渠道键与字段键双重白名单，连接参数、dataDir、凭据一律不收**；两端 status 回传各渠道生效值+追踪数+displayName
+- [bridge.js](bridge.js)：AlertManager 与两个配置 API 注入 adapters；前端 [web/app.js](web/app.js) 单渠道视图恒以 `channel:'agnes'` 同步（只覆盖 agnes，不影响其他渠道），SW 缓存 bump v16
+- 实测：离线 30+ 断言（旧格式归一/去重/限量、agnes 回退、四态 7 分支、渠道开关门控、同态去重、双渠道独立指纹、全故障渠道邮件、旧 classify 签名）；真实 390 个 WorkBuddy 会话 classify 抽查正确；HTTP 层 200/400/501 实测；重启后本地+公网 health 双 200（agnes 32 / workbuddy 390 均在线）；现有 32 条旧 watchlist 自动归一 agnes，零迁移
+- 注意：WorkBuddy 渠道两个告警开关默认**关闭**，需要在向导/远程页手动开启后才会发该渠道邮件；看板渠道 Tab 为 Phase 3
+
+### 变动十九：V4 Phase 3 · 看板渠道 Tab（多渠道切换，单接入不显示）
+
+**背景**：Phase 2 完成配置分层后，前端仍是单看板视角。Phase 3 让列表页按启用渠道渲染切换 Tab——「一个看板盯多个 Agent」的前端最后一环；同时明确**单接入（仅 agnes）时界面与 V3 完全一致，零感知**。
+
+- 后端能力位：BaseAdapter 新增 `canSend`（默认 true，[lib/adapters/base.js](lib/adapters/base.js)）；WorkBuddy 只读渠道覆写 false（[lib/adapters/workbuddy.js](lib/adapters/workbuddy.js)）；/health 的 channels 汇总带 canSend（[lib/adapters/index.js](lib/adapters/index.js)）
+- 渠道 Tab（[web/index.html](web/index.html) + [web/style.css](web/style.css) + [web/app.js](web/app.js)）
+  - 列表页顶置 `#ch-tabs` 胶囊 Tab（横向可滑动）：Tab = displayName + 健康状态点（绿=在线/红=故障），当前 Tab 蓝底高亮；**仅启用渠道 ≥2 时渲染**，单接入不出现
+  - 点击切换：清空任务与分组展开态、按 `?channel=` 重拉列表；当前 Tab 渠道在 /health 中消失时自动回退第一可用渠道
+  - 追踪键升级为「渠道:任务id」（loadWatchLs 兼容旧纯 id 自动归 agnes）；syncAlerts 只上报当前渠道（服务端单渠道覆盖，其他渠道条目不受影响）
+  - 详情页快照 currentChannel 防 Tab 串扰；底部发消息输入栏按渠道 canSend 显隐——WorkBuddy 只读渠道隐藏输入框，与后端 501 语义一致
+  - 任务缓存 LS 改 `{ch, tasks}` 结构（旧数组=agnes）；WS 实时事件目前仅 agnes 接线（bridge 只对 official.setOnChange），非 agnes 渠道列表/详情更新靠下拉刷新，相关推送回调按渠道门控防串台
+- SW 缓存 bump v17
+- 实测：全部改动文件 node --check 通过；重启后本地+公网 /health 双 200（agnes canSend=true / workbuddy canSend=false）；browser_use 三轮实测 8 项全过——自动配对、双 Tab 渲染带状态点、agnes 默认列表、切 WorkBuddy/切回、WorkBuddy 详情无输入框、agnes 详情有输入框、铃铛开（金色+toast）/关（灰色）闭环且最终关闭
+- 踩坑：验证期发现服务端 watchlist 曾被短暂覆盖为缺 4 条的快照（32→28），来源指向离线验证脚本直写真实 config.json 的副作用；用户手机端随即以本地完整 32 条同步自愈（服务端真源设计反向发挥作用），已复核 GET /api/alerts/watchlist 返回完整 32 条无过滤丢失。规约沉淀：**离线验证/测试脚本一律不得直写真实 config.json**——须深拷贝 cfg 或把保存路径指向临时文件
+
+### 变动二十：看板列表加载提速（服务端快照预热 + 前端按渠道缓存秒显）
+
+**背景**：用户反馈手机打开看板链接后列表加载慢——进看板先空屏再渲染；切到 WorkBuddy 又空屏重拉；**切回爱思办公还是空屏**，每次切换都像全新请求。桥接为个人/小团队本地部署（无并发压力），可激进缓存：让服务端提前把各渠道任务列表备好，手机端点进来即取即显。
+
+- 服务端快照（[lib/adapters/index.js](lib/adapters/index.js)）：createAdapters 内置 `_snap` 快照表（ch → {tasks, at}）
+  - `listTasksSnapshot(ch)`：有快照**立即返回**（过期也先返回旧数据、同时后台静默刷新，stale-while-revalidate）；无快照才等待实拉
+  - `listTasksFresh(ch)`：绕过快照强制实拉并回写（下拉/手动刷新用），失败向上抛保持既有错误语义
+  - 预热：initAll 每个 adapter init 后立即实拉预热；60 秒常热定时器周期刷新全渠道快照（对齐阻塞检测节奏）；closeAll 清定时器
+  - 隔离铁律延续：快照刷新失败仅 warn 日志并保留旧快照，单渠道故障不拖垮其他渠道
+- API 层（[lib/localApi.js](lib/localApi.js)）：GET /api/tasks 默认走 `listTasksSnapshot`（命中即毫秒级返回）；`?fresh=1` 走 `listTasksFresh`；adapters 未注入的旧装配路径保持直连
+- 前端（[web/app.js](web/app.js)）
+  - 新增 `state.tasksByCh`（Map）：按渠道内存缓存任务列表，**切 Tab 先用缓存秒显再静默刷新**（修掉「切回又空屏」的根因——旧 switchChannel 先清空重拉）
+  - loadList 快照 `ch = state.channel` 防竞态：响应回来若已切走，只更新缓存不覆盖当前渠道渲染
+  - 新增 `prefetchOtherChannels()`：当前渠道加载完成 / 渠道注册表就绪后，后台静默预取其他渠道列表（去重防并发）；503 时若有缓存保留旧列表（顶部提示条说明原因）
+  - 刷新语义分层：下拉刷新/手动刷新/轮询降级走 `fresh=1` 实拉；进看板/切 Tab 走快照（WS 实时事件仍按原逻辑原地更新，不经快照）
+- SW 缓存 bump v20（lib/localApi.js shellVer ↔ web/app.js SHELL_VER ↔ web/sw.js CACHE 三处同步）
+- 实测：4 个改动文件 node --check 通过；重启后 /health shellVer=v20 双渠道全绿（agnes 32 条 / workbuddy 390 条）；带令牌实测——agnes 快照 **13ms**、workbuddy 快照 **11ms**（旧路径 workbuddy 实拉 33ms 起，公网还叠加隧道往返）、`?fresh=1` 正常回写；服务日志无错误无刷新失败告警
+- 说明：workbuddy 列表 100 条为其既有 MAX_LIST 上限（快照/实拉一致），/health tasks=390 是 taskCount 全量计数，非本次回归
+
+### 变动二十一：看板列表条数上限可配置（workbuddy MAX_LIST 100 → 配置项）
+
+**背景**：用户重度使用 WorkBuddy 近半年任务积累 390+ 条，写死的 `MAX_LIST = 100` 只显示最近 100 条——用户指出这是人为截断，上线后用户任务到 101 条时第 101 条"消失"会被当成 bug。需求：条数上限做成配置（向导滑块 100~1000，默认 100），滑块上限值也可在配置文件里继续调大，不设硬顶（改多大只是"允许多大"，实际返回条数受任务总量自然约束）。
+
+- 配置项（[lib/config.js](lib/config.js) DEFAULTS.channels.workbuddy 新增，均热生效）
+  - `listLimit`：看板列表条数上限，默认 100，下限兜底 100（[lib/adapters/workbuddy.js](lib/adapters/workbuddy.js) `_listLimit()` 实时读取，删除写死的 MAX_LIST 常量）
+  - `listLimitMax`：向导滑块允许的最大值，默认 1000；**不进 setup 白名单，仅配置文件可改**——手改后重新打开向导，滑块范围自动扩展到 100~新值
+- 向导 UI（[web/setup.html](web/setup.html) 第 4 步「看板列表条数上限」滑块）：仿配对码有效期滑块；标题右侧实时显示当前值（滑动跟随，保存后与配置一致）；**配置文件手改值超出滑块范围时（如 2000 > 滑块上限 1000），滑块钳在最大位但标题仍显示实际生效值 2000**
+- API（[lib/setupApi.js](lib/setupApi.js)）：channelStatuses 回显两键；POST /api/setup/save 白名单收 `channels.workbuddy.listLimit`（下限 100、上限 = 当前 `listLimitMax` 钳制）；适配器经 cfg 引用实时读值（config.save 原地 deepMerge，引用恒为最新）→ 保存即热生效无需重启
+- 文档：README「配置说明（config.json）」表新增两键说明（含手改方式）
+- 实测：4 个改动文件 node --check 通过；重启后 /api/setup/status 回显 listLimit=100/listLimitMax=1000；经 setup API 保存 listLimit=1000 热生效（无重启）——workbuddy 实拉 **392 条 / 82ms**、快照 **392 条 / 27ms**，agnes 32 条不受影响；公网 /health v20 双绿（workbuddy tasks=392）；当前用户配置保留 1000
+
+### 变动二十二：多渠道邮件合并（汇总一封分节 + 报警标注来源渠道）
+
+**背景**：V4 多渠道上线后，每个启用「任务汇总」的渠道仍各发各的定时邮件（渠道多了收件箱被轰炸），且单任务报警邮件看不出任务来自哪个渠道。用户需求：①汇总邮件**只发一封**，内部像看板首页 Tab 一样按渠道分节（「爱思办公任务汇总」一节带表格、「WorkBuddy 任务汇总」一节，无变化的渠道显示现有提示文案）；②报警邮件显示任务来源渠道（爱思办公还是 WorkBuddy）。**用户追加**：两种邮件都要像看板一样先显示任务目录再显示任务——渠道多、任务多之后定位必须三级不缺失（**渠道 → 任务目录 → 任务**）。
+
+- 汇总合并一封（[lib/alerts.js](lib/alerts.js)）
+  - `sendDigest(channel)` 替换为 `sendDigestAll()`：遍历所有启用汇总的渠道，收集各渠道 `_digestSection()` 分节，合到一封 `mailer.sendDigest({sections, ...})`；**节拍 = 各启用渠道间隔的最小值**（单一定时器 `_digestTimers['*']`，`_digestBeat`），applyConfig 热应用重建
+  - `_digestSection(ch, ids)`：单渠道收集有变化任务行；指纹基线 key 升级 `渠道:任务id`，**基线仍按渠道独立**（删旧写新只动本渠道前缀）；全部任务查询失败不再单独发整封异常邮件，返回 down 节（`{down: true}`）
+  - 汇总关闭或无追踪任务的渠道不出节；日志输出「合并定时统计已发送（爱思办公 N 个有变化；WorkBuddy 均无变化）」
+- 邮件模板分节渲染（[lib/mailer.js](lib/mailer.js)）
+  - `sendDigest(p)` 重写为多分节：每节 = 渠道徽章 + 「任务汇总」标题 + 表格；down 节 → 红色「数据源不可用」警告框；rows 空 → 「本轮 X 个被追踪任务均无变化」；有行 → 表格 + 「另有 N 个无变化」脚注；主标题用顶层 `alerts.digestTitle`，节拍说明改为「各渠道合并为一封」
+  - **`sendAcpDown` 整函数删除**（数据源故障信息并入合并邮件 down 节，不再单独发异常邮件）
+- 报警邮件来源徽章（[lib/alerts.js](lib/alerts.js) `checkBlocking`）：`source = displayNameOf(channel)`——**所有渠道（含 agnes）都带**，正文显示「来源渠道：爱思办公 / WorkBuddy」，用户可分辨任务来自哪个看板 Tab
+- 邮件三级定位（渠道 → 任务目录 → 任务，用户追加需求）
+  - 数据源：workbuddy 详情自带 `group` 显示名直取；agnes 详情原本不带目录——[lib/official.js](lib/official.js) `_acpDetail` 正常/降级两处返回补 `cwd`
+  - [lib/alerts.js](lib/alerts.js) 新增 `_dirOf(t)`：`group` 优先、回退 `path.basename(cwd)`；汇总行与告警 payload 都带 `dir`；告警日志同步带 `[渠道/目录]` 便于对账
+  - [lib/mailer.js](lib/mailer.js)：汇总表格加「📁 目录」列（**目录列在任务列前**，与看板「先目录后任务」一致，空显示 —）；报警邮件状态块内加「📁 任务目录：X（来源渠道：Y）」行
+- 离线验证（[tests/verify-digest-merge.js](tests/verify-digest-merge.js)，mock mailer/adapters 深拷贝 cfg）：9 组断言全绿——双渠道一封两节 / 节拍 30（取最小）/ 汇总关渠道不出节 / down 节 / 基线独立（挂掉两轮恢复后只影响自己）/ agnes 也带来源徽章 + 目录（basename 回退）/ workbuddy 目录（group 直取）/ 同一阻塞态不重复轰炸
+- 实测：`node --check` 通过；重启后日志「定时统计：爱思办公 每 30 分钟（合并为一封，按最短间隔 30 分钟发送）」；经 setup API 临时把间隔调 10 分钟收到真实合并邮件验证后恢复 30
+
+### 变动二十三：邮件渠道节标题样式修正 + 标题配置空值拦截（默认值回填）
+
+**背景**：①变动二十二上线的汇总邮件渠道节用了「胶囊徽章 + 标题」样式，用户实测反馈胶囊看起来像可切换的标签页（邮件里根本没有交互），要求改成一目了然的列表分节——一个渠道、一个标题、一个表格；②标题类配置（汇总标题/报警前缀）清空后点保存会存进空串，用户要求：留空保存必须拦截并自动填回默认值，且把默认值写进配置项说明便于参照。
+
+- 渠道节标题去胶囊（[lib/mailer.js](lib/mailer.js)）：「[渠道名] 任务汇总」胶囊 → 纯静态标题行「渠道名 · 任务汇总」（左侧 4px 蓝竖线 + 15px 加粗），多渠道纯上下罗列，零交互暗示
+- 报警邮件同步（[lib/mailer.js](lib/mailer.js)）：删除正文来源胶囊；来源并入「📁 任务目录：X（来源渠道：Y）」行，目录缺失时单独一行「来源渠道：Y」——三级定位（渠道/目录/任务）不缺失
+- 标题空值拦截（[web/setup.html](web/setup.html) saveAll / [web/remote.html](web/remote.html) saveSettings）：清空留空点保存 → **阻止提交** + 两个标题输入框自动填回默认值（「任务汇总邮件」/「单任务报警-」）+ 红色提示「已自动填回默认值…请确认后重新保存」；确认后再次保存正常（远程页按手机体验：回填后直接以默认值保存）
+- 后端兜底（[lib/setupApi.js](lib/setupApi.js)）：标题字段白名单收到空串一律**不写入**（保留原值），直接调 API 也无法把标题抹成空
+- 说明文案：两个输入框 label 明确「留空保存会被拦截并自动填回默认『XXX』」，placeholder 显示「默认值：XXX」
+- 实测：browser_use 本机向导实测 3/3 通过（清空→保存→拦截+回填+错误提示；再次保存成功）；`node --check` 通过；离线断言 6 组全绿（告警 payload 未变）
+
+### 变动二十四：WorkBuddy 进程门禁（应用不在 = 渠道无数据）
+
+**背景**：用户关闭 WorkBuddy 桌面端后，看板 Tab 顶部提示「取不到数据」、下方却仍渲染旧列表——根因是进程探测（health → tasklist）与数据读取（磁盘 JSONL 直读，本身不依赖应用进程）是两条独立路径，产生「进程没了数据还在」的矛盾观感。用户定稿语义：**确认拿不到就清零，跟实际相符**（WorkBuddy 无本地 API/ACP 可走，读盘是唯一数据途径；进程门禁对齐 agnes「未检测到进程=空看板」体验）。
+
+- [lib/adapters/workbuddy.js](lib/adapters/workbuddy.js)：`listTasks`/`getTask` 入口**前置进程探测**，探测不到 WorkBuddy.exe → 返回空列表/null；快照层随空列表自然清零 → 看板清空只留提示条，应用重开后自动恢复（health 有 30 秒缓存，最长 30 秒延迟）
+- `getTask` 同门禁：应用不在时详情按无数据处理，告警分类跳过（不会对已关闭渠道误报）
+- 附带简化：running 叠加不再需要 appAlive 条件（门禁保证在线才走到这一步）
+- 实测：`node --check` 通过；应用在线路径 394 条正常返回（health=true）；关闭路径为门禁早退逻辑，用户关闭应用后 ≤60 秒（快照刷新周期）看板清零、重开自动恢复
+
 ### V3.1.0 踩坑实录（开发期问题 → 解决实践）
 
 | # | 问题 | 根因 | 解决 |
@@ -59,6 +242,8 @@
 | 9 | 配对码「点一次就作废」与 TTL 矛盾：用户 120 分钟内第二次点邮件链接报「无效或已过期」，且每次消费还触发新码邮件 | `PairManager.pair()` 用后即焚（一次性语义）与「有效期」语义冲突——用户明确：TTL 内点多少次都应有效 | 移除消费即焚：码在 TTL 内可重复配对（多设备各自换令牌），过期才作废自动换新；消费不再触发新码邮件；README 5 处「一次性」描述同步修正 |
 | 10 | 单任务告警/汇总邮件的「打开看板」链接点不开：链接是纯地址不带 code，未配对手机停在配对页；且旧 code 链接失败会盖掉本地已有令牌 | alerts 的 getBaseUrl 只返回 `tunnel.url`；boot 见 `?code=` 无条件 autoPair 且失败即停配对页，不回退本地令牌 | ① getBaseUrl 拼当前有效码（PairManager.currentCode），未配对设备点击即自动配对进入 ② autoPair 失败时回退读本地 conn + health 校验，已配对设备直接进 |
 | 11 | 电脑端批量「全开」追踪后，手机只显示一半任务有标记，两边不同步 | 追踪标记在每个浏览器各存一份 localStorage，UI 只渲染本地副本、从不向服务端拉取；且 enterList 每次都把本地清单**全量覆盖推送**——旧副本设备一进看板就冲掉其他设备的改动（顺序决定数据） | 确立**服务端为清单唯一真源**：新增 GET /api/alerts/watchlist（alerts.getWatchlist）；enterList 改为 reconcileWatch()——进看板先拉服务端清单覆盖本地并重绘，拉取失败（离线）保留本地不推送；实际开关操作仍即时推送；SW v14 |
+| 12 | 汇总邮件渠道节用胶囊徽章，用户误认为可切换的标签页（实测截图反馈） | 邮件里没有交互，任何「控件感」视觉（胶囊/按钮样）都会误导；且仅凭截图无法还原设计意图，需按用户口述的字面结构（渠道→标题→表格罗列）实现 | 改纯标题行（左竖线+加粗）；教训：**邮件模板不用任何按钮/胶囊/标签类样式表达分组** |
+| 13 | 合并汇总邮件整轮未发且日志无任何痕迹 | 服务端 watchlist 被清空（清空动作发生在留存日志之外无法取证；config.save deepMerge 对未提及的数组键原样保留，本次保存操作已排除嫌疑），sendDigestAll 无追踪任务 → sections 空 → 静默 return false | 排查「定时邮件没发」先查 `/api/setup/status` 的 watchCount 是否为 0；设备本地清单未被覆盖时，任意铃铛开关触发 sync 即整清单自愈（32→28 事件先例） |
 
 ---
 

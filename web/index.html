@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>agent-vigil · Agent任务看板与监控</title>
+  <title>AgentVigil · Agent任务看板与监控</title>
   <meta name="description" content="局域网只读查看电脑端任务进度的协同看板（非官方、免费、开源）" />
   <meta name="theme-color" content="#2563eb" />
   <link rel="manifest" href="manifest.json" />
@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-  <meta name="apple-mobile-web-app-title" content="任务看板" />
+  <meta name="apple-mobile-web-app-title" content="AgentVigil" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -29,7 +29,7 @@
     <section id="view-connect" class="view">
       <div class="connect-card">
         <img class="logo" src="icons/icon-192.png" alt="应用图标" />
-        <h1>agent-vigil</h1>
+        <h1>AgentVigil</h1>
         <p class="sub">非官方 · 免费 · 开源 · 只读 · 局域网</p>
         <div class="form">
           <label for="in-base">电脑地址</label>
@@ -50,6 +50,7 @@
     <!-- 任务列表页 -->
     <section id="view-list" class="view hidden">
       <div id="ptr"><span id="ptr-label">下拉刷新</span></div>
+      <nav id="ch-tabs" class="hidden" aria-label="渠道切换"></nav>
       <div id="acp-banner" class="hidden" style="margin:0 12px 10px;padding:12px 14px;border-radius:10px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-size:13px;line-height:1.6;">⚠ 未检测到爱思办公进程，取不到任务数据。请在电脑上启动爱思办公桌面应用，桥接服务会自动连接，无需重启。</div>
       <div id="task-list" class="cards"></div>
     </section>

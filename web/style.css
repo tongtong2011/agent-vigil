@@ -193,6 +193,51 @@ body.in-detail main {
   line-height: 1.4; -webkit-tap-highlight-color: transparent;
 }
 .fwbtn:active { background: #fff7ed; border-color: #fdba74; color: #c2410c; }
+
+/* V4：渠道 Tab（仅多渠道时显示；sticky 钉在顶栏下方，不随列表滚动；横向可滚动） */
+#ch-tabs {
+  position: sticky;
+  top: var(--topbar-h, 56px);   /* 与详情页钉住区同款：紧贴顶栏底边，无缝隙 */
+  z-index: 6;
+  display: flex;
+  gap: 8px;
+  padding: 6px 12px 10px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  background: var(--bg);        /* 滚动内容不从胶囊缝隙间透出 */
+}
+#ch-tabs::-webkit-scrollbar { display: none; }
+#ch-tabs.hidden { display: none; }
+.ch-tab {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--muted);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 14px;
+  -webkit-tap-highlight-color: transparent;
+}
+.ch-tab.on {
+  color: #fff;
+  background: var(--brand);
+  border-color: var(--brand);
+}
+.ch-tab .dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: #cbd5e1;
+  flex-shrink: 0;
+}
+.ch-tab .dot.ok { background: #22c55e; }
+.ch-tab .dot.bad { background: #ef4444; }
+.ch-tab.on .dot.ok { background: #86efac; }
+.ch-tab.on .dot.bad { background: #fca5a5; }
 .fchev { flex-shrink: 0; width: 16px; color: var(--brand); font-size: 14px; text-align: center; }
 .fname { flex: 1; font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fcount {
@@ -279,15 +324,15 @@ body.in-detail main {
 .chat-first {
   margin-top: 10px;
   max-height: 38vh;         /* 展开态：首条指令过长时内部滚动，避免钉住区占满屏幕 */
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
+  display: flex;            /* 纵向 flex：标签行钉死，仅 .first-body 内部滚动 */
+  flex-direction: column;
+  overflow-y: hidden;       /* 容器本身不滚（滚动移到指令正文） */
   cursor: pointer;
   position: relative;
 }
-/* 收起态（伸缩门，默认）：只露出约两行，点击展开；展开后可内部滚动 */
+/* 收起态（伸缩门，默认）：只露出约两行，点击展开；展开后仅正文内部滚动 */
 .chat-first.collapsed {
   max-height: 92px;
-  overflow-y: hidden;
 }
 .chat-first.collapsed::after {   /* 底部渐隐提示还有更多内容 */
   content: '';
@@ -297,7 +342,20 @@ body.in-detail main {
   background: linear-gradient(transparent, var(--bg));
   pointer-events: none;
 }
-.first-label { font-size: 11.5px; color: var(--muted); margin: 0 4px 4px; }
+.first-label {
+  flex-shrink: 0;           /* 「任务指令」标签行 + 展开/收起链接固定不随内容滚动 */
+  font-size: 11.5px;
+  color: var(--muted);
+  margin: 0 4px 4px;
+}
+/* 指令正文滚动区：滚到顶/底不带动页面（钉住区与消息流保持不动） */
+.first-body {
+  overflow-y: auto;
+  min-height: 0;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+.chat-first.collapsed .first-body { overflow-y: hidden; }
 /* 顶栏任务名：标题（小字省略）+ 创建时间（更小灰字），仅详情页显示 */
 #top-task {
   flex: 1;

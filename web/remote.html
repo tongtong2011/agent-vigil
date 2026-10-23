@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>远程配置 · agent-vigil</title>
+  <title>远程配置 · AgentVigil</title>
   <meta name="robots" content="noindex, nofollow" />
   <style>
     :root {
@@ -67,6 +67,30 @@
       background: #f0f5ff; border-radius: 10px; padding: 10px 12px;
       font-size: 12.5px; color: #3b5aa0; margin-top: 10px; line-height: 1.7;
     }
+    .switch { display: flex; align-items: center; gap: 9px; margin: 12px 0; cursor: pointer; }
+    .switch input { width: 38px; height: 21px; appearance: none; background: #cbd5e1; border-radius: 999px; position: relative; cursor: pointer; transition: background .15s; flex-shrink: 0; }
+    .switch input:checked { background: var(--brand); }
+    .switch input::after { content: ''; position: absolute; top: 2px; left: 2px; width: 17px; height: 17px; border-radius: 50%; background: #fff; transition: left .15s; }
+    .switch input:checked::after { left: 19px; }
+    .switch .t { font-size: 14px; font-weight: 600; }
+    .switch .s { font-size: 12px; color: var(--muted); }
+    select, input[type=text] {
+      width: 100%; padding: 10px 11px; border: 1px solid var(--line);
+      border-radius: 9px; font-size: 14.5px; background: #fafafa; color: var(--text);
+    }
+    input[type=range] { width: 100%; accent-color: var(--brand); }
+    .rangeval { font-weight: 700; color: var(--brand); }
+    .seg { display: flex; gap: 6px; margin: 8px 0; }
+    .seg button {
+      flex: 1; padding: 9px 6px; border: 1px solid var(--line); border-radius: 9px;
+      background: #fafafa; font-size: 13px; font-weight: 600; color: var(--muted);
+    }
+    .seg button.on { border-color: var(--brand); background: #f0faf4; color: var(--brand); }
+    .seg button:disabled { opacity: .5; cursor: default; }
+    .urlbox {
+      background: #f8fafc; border: 1px solid var(--line); border-radius: 8px;
+      padding: 8px 10px; font-size: 12.5px; word-break: break-all; color: var(--muted); margin-top: 8px;
+    }
   </style>
 </head>
 <body>
@@ -99,9 +123,46 @@
     <button class="btn ghost full" id="btn-test" onclick="sendTest()" style="margin-top:6px;">📨 用当前配置发一封测试邮件</button>
   </div>
 
+  <div class="card">
+    <h2>任务告警与汇总</h2>
+    <p class="desc">追踪标记在看板任务列表里点铃铛设置；汇总间隔与标题全渠道统一，各渠道开关单独配。</p>
+    <label>统计间隔（全渠道统一，启用汇总的渠道合并为一封邮件）</label>
+    <select id="s-interval">
+      <option value="30">每 30 分钟</option>
+      <option value="60">每 60 分钟</option>
+      <option value="120">每 2 小时</option>
+      <option value="240">每 4 小时</option>
+    </select>
+    <label>汇总邮件标题（全渠道统一）</label>
+    <input type="text" id="s-digest-title" maxlength="50" placeholder="任务汇总邮件" />
+    <div id="s-channels" style="margin-top:14px;"><!-- 每渠道开关与前缀（JS 渲染） --></div>
+  </div>
+
+  <div class="card">
+    <h2>访问与配对</h2>
+    <label>配对码有效期：<span class="rangeval" id="s-ttl-val">—</span></label>
+    <input type="range" id="s-ttl" min="5" max="120" step="5" />
+    <p class="desc" style="margin-top:4px;">有效期内同一个配对码可重复使用、可配多台设备；服务重启后仍会换新码。</p>
+    <label class="switch"><input type="checkbox" id="s-msg" /><span><span class="t">允许手机端发消息</span><br /><span class="s">关闭后看板只能看任务，不能给 AI 发新指令</span></span></label>
+  </div>
+
+  <div class="card">
+    <h2>公网隧道</h2>
+    <label class="switch"><input type="checkbox" id="s-tun-en" /><span><span class="t">启用公网隧道</span><br /><span class="s">关闭后只能在同一 WiFi（局域网）内打开看板</span></span></label>
+    <label>隧道模式</label>
+    <div class="seg">
+      <button type="button" id="s-tun-quick" onclick="setTunMode('quick')">自动快速隧道</button>
+      <button type="button" id="s-tun-named" onclick="setTunMode('named')">固定域名（正式）</button>
+    </div>
+    <div class="urlbox" id="s-tun-info">—</div>
+    <div style="margin-top:14px;"><button class="btn full" onclick="saveSettings()">💾 保存以上全部设置</button></div>
+    <div class="msg" id="msg-set"></div>
+  </div>
+
   <div class="hint">
-    🔒 本页为受限远程配置：只能改收件人、切换档案、发测试邮件。
-    修改 SMTP 服务器/授权码等敏感信息，请在电脑端打开
+    🔒 本页为受限远程配置：收件人、档案切换、测试邮件、告警开关/标题、配对有效期、
+    手机发消息、隧道启停与已初始化模式切换都可以在这里完成。
+    修改 SMTP 服务器/授权码、命名隧道初始化（绑定域名）等敏感操作，请在电脑端打开
     <code>http://127.0.0.1:8787/setup.html</code>（仅限本机）。
     链接含管理令牌，请勿转发给他人；桥接重启后令牌刷新，以最新邮件为准。
   </div>
@@ -131,6 +192,103 @@
     if (!res.ok) throw new Error((data.error && data.error.message) || `请求失败（${res.status}）`);
     return data;
   }
+
+  function showSetMsg(text, ok) {
+    const el = $('#msg-set');
+    el.className = 'msg ' + (ok ? 'ok' : 'err');
+    el.textContent = text;
+    if (ok) setTimeout(() => { el.className = 'msg'; }, 4000);
+  }
+
+  // 绿档设置（告警/配对/发消息/隧道）回显与保存
+  let tunMode = 'quick';
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+  function renderSettings() {
+    const s = st.settings;
+    if (!s) return;
+    const a = s.alerts;
+    $('#s-interval').value = String(a.digestIntervalMinutes);
+    $('#s-digest-title').value = a.digestTitle || '';
+    renderChannels(s.channels || {});
+    $('#s-ttl').value = s.pair.codeTtlMinutes;
+    $('#s-ttl-val').textContent = s.pair.codeTtlMinutes + ' 分钟';
+    $('#s-msg').checked = !!s.messages.enabled;
+    const t = s.tunnel;
+    $('#s-tun-en').checked = !!t.enabled;
+    tunMode = t.mode;
+    $('#s-tun-quick').classList.toggle('on', t.mode === 'quick');
+    $('#s-tun-named').classList.toggle('on', t.mode === 'named');
+    $('#s-tun-named').disabled = !t.canNamed;
+    $('#s-tun-info').textContent =
+      (t.url ? '当前公网地址：' + t.url : '隧道未就绪（启用后约 10~30 秒获得地址）') +
+      (t.hostname ? '；固定域名：' + t.hostname : '') +
+      (t.canNamed ? '' : '；固定域名未初始化（需在电脑端向导第 3 步完成）');
+  }
+
+  /* ── V4.1 每渠道汇总/报警开关与前缀 ── */
+  function renderChannels(chs) {
+    $('#s-channels').innerHTML = Object.keys(chs).map((ch) => {
+      const c = chs[ch] || {};
+      const defPrefix = ch === 'agnes' ? '单任务报警-' : `[${c.displayName || ch}] 单任务报警-`;
+      return `
+      <div data-chblock="${esc(ch)}" style="border:1px solid #e5e7eb;border-radius:10px;padding:10px 12px 4px;margin:8px 0;">
+        <div style="font-size:13px;color:#6b7280;margin-bottom:2px;"><b>${esc(c.displayName || ch)}</b>${c.enabled ? '' : '（未接入，开关暂不生效）'} · 已追踪 ${c.watchCount} 个任务</div>
+        <label class="switch"><input type="checkbox" data-chf="digest" ${c.digestEnabled ? 'checked' : ''} /><span><span class="t">任务汇总（该渠道）</span><br /><span class="s">该渠道被追踪任务进入汇总邮件（按渠道分节）</span></span></label>
+        <label class="switch"><input type="checkbox" data-chf="alert" ${c.alertEnabled ? 'checked' : ''} /><span><span class="t">单任务报警（该渠道）</span><br /><span class="s">该渠道被追踪任务阻塞时立即发报警邮件</span></span></label>
+        <label>该渠道报警标题前缀（留空 = 用默认「${esc(defPrefix)}」）</label>
+        <input type="text" data-chf="prefix" maxlength="30" placeholder="${esc(defPrefix)}" value="${esc(c.alertPrefix || '')}" />
+      </div>`;
+    }).join('');
+  }
+  function collectChannels() {
+    const out = {};
+    document.querySelectorAll('#s-channels [data-chblock]').forEach((blk) => {
+      const ch = blk.getAttribute('data-chblock');
+      const get = (f) => blk.querySelector(`[data-chf="${f}"]`);
+      const cur = {};
+      cur.digestEnabled = get('digest').checked;
+      cur.alertEnabled = get('alert').checked;
+      const pfx = get('prefix').value.trim();
+      if (pfx) cur.alertPrefix = pfx; // 留空 = 用该渠道默认前缀
+      out[ch] = cur;
+    });
+    return out;
+  }
+
+  function setTunMode(m) {
+    if (m === 'named' && st.settings && !st.settings.tunnel.canNamed) {
+      showSetMsg('固定域名尚未在电脑端初始化，手机端只能切回自动快速隧道', false);
+      return;
+    }
+    tunMode = m;
+    $('#s-tun-quick').classList.toggle('on', m === 'quick');
+    $('#s-tun-named').classList.toggle('on', m === 'named');
+  }
+
+  async function saveSettings() {
+    // 标题空值拦截：与电脑端向导一致——留空自动填回默认值
+    if (!$('#s-digest-title').value.trim()) $('#s-digest-title').value = '任务汇总邮件';
+    const body = {
+      alerts: {
+        digestIntervalMinutes: Number($('#s-interval').value),
+        digestTitle: $('#s-digest-title').value.trim()
+      },
+      channels: collectChannels(),
+      pair: { codeTtlMinutes: Number($('#s-ttl').value) },
+      messages: { enabled: $('#s-msg').checked },
+      tunnel: { enabled: $('#s-tun-en').checked, mode: tunMode }
+    };
+    try {
+      const r = await api('/api/remote/save-settings', body);
+      st.settings = r.settings;
+      renderSettings();
+      showSetMsg('✅ 设置已保存并立即生效（隧道/告警调整可能需十几秒完成）', true);
+    } catch (e) { showSetMsg('❌ ' + e.message, false); }
+  }
+
+  $('#s-ttl').addEventListener('input', () => { $('#s-ttl-val').textContent = $('#s-ttl').value + ' 分钟'; });
 
   function render() {
     const m = st.mailer;
@@ -165,6 +323,7 @@
     try {
       st = await api('/api/remote/status');
       render();
+      renderSettings();
     } catch (e) {
       document.body.innerHTML =
         `<header><div class="wrap"><h1>远程配置</h1></div></header>` +
@@ -178,7 +337,7 @@
     btn.disabled = true;
     try {
       const r = await api('/api/remote/save-to', { to: $('#in-to').value.trim() });
-      st = r;
+      st.mailer = r.mailer;
       render();
       showMsg('✅ 收件邮箱已保存，最新连接信息正在重发到新邮箱', true);
     } catch (e) { showMsg('❌ ' + e.message, false); }
@@ -198,7 +357,7 @@
     if (!confirm(`切换发件配置到「${name}」？切换后立即重发最新连接信息。`)) return;
     try {
       const r = await api('/api/remote/apply-profile', { name });
-      st = r;
+      st.mailer = r.mailer;
       render();
       showMsg(`✅ 已切换到「${name}」`, true);
     } catch (e) { showMsg('❌ ' + e.message, false); }

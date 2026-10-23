@@ -4,7 +4,7 @@
  * - 离线时数据层由 app.js 展示最后缓存列表（localStorage）
  * 改动静态资源后无需手动升级， bump 此版本号可强制全量刷新：
  */
-const CACHE = 'otc-shell-v15';
+const CACHE = 'otc-shell-v22';
 const SHELL = [
   '/',
   '/index.html',

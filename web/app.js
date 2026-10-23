@@ -8,15 +8,17 @@
  */
 (function () {
   const LS_CONN = 'otc.conn.v1';   // { base, deviceToken }
-  const LS_WATCH = 'otc.alert.watch.v1';  // V3：被追踪（邮件告警）任务 id 数组
-  const LS_CACHE = 'otc.cache.v1'; // 最后一次任务列表缓存
+  const LS_WATCH = 'otc.alert.watch.v1';  // V4：追踪清单键数组（"渠道:任务id"；旧版纯 id 读取时归 agnes）
+  const LS_CACHE = 'otc.cache.v1'; // 最后一次任务列表缓存（V4：{ch, tasks}，旧版纯数组=agnes）
   const FETCH_TIMEOUT = 5000;      // 网络超时统一 5 秒
 
   const $ = (s) => document.querySelector(s);
 
   const state = {
     conn: null,        // { base, token }
-    watch: new Set(lsGet(LS_WATCH, [])),  // V3：追踪清单（localStorage 持久化，刷新/重开保持）
+    channel: 'agnes',  // V4 当前渠道 Tab（单渠道时恒 agnes，不显示 Tab）
+    channels: [],      // V4 渠道注册表（/health channels：[{channel,displayName,ok,canSend}]）
+    watch: null,       // V4 追踪键集合（"渠道:任务id"，见下方 loadWatchLs）
     ws: null,
     wsUp: false,
     wsBackoff: 1000,   // 指数退避：1s → 30s
@@ -24,10 +26,25 @@
     pollTimer: null,
     pollMs: 4000,      // 降级轮询间隔（2~5 秒）
     tasks: [],
+    tasksByCh: new Map(),      // 按渠道内存缓存任务列表：切 Tab 秒显，不必重新等请求
     expandedGroups: new Set(), // 已展开的文件夹 key（cwd）；默认全部收起，重渲染时保留
     currentId: null,
+    currentChannel: 'agnes',   // 详情页所属渠道（openDetail 时快照，防 Tab 状态串扰）
     detail: null
   };
+
+  /** 追踪键：渠道与任务 id 组合成全局唯一键（同一 taskId 在不同渠道不冲突） */
+  function watchKey(ch, id) { return ch + ':' + id; }
+
+  /** 读取本地追踪清单：V4 键数组；旧版纯 taskId 数组（无冒号）归一成 agnes 渠道 */
+  function loadWatchLs() {
+    const raw = lsGet(LS_WATCH, []);
+    return new Set((Array.isArray(raw) ? raw : []).map((k) => {
+      k = String(k);
+      return k.indexOf(':') >= 0 ? k : watchKey('agnes', k);
+    }));
+  }
+  state.watch = loadWatchLs();
 
   const STATUS = {
     running: { text: '正在执行', cls: 'running' },
@@ -70,8 +87,9 @@
       $('#view-' + v).classList.toggle('hidden', v !== name);
     });
     $('#topbar').classList.toggle('hidden', name === 'connect');
-    // 发消息输入栏仅在详情页显示
+    // 发消息输入栏在详情页显示；canSend=false 的渠道降级为「复制指令」模式（仍显示）
     $('#composer').classList.toggle('hidden', name !== 'detail');
+    if (name === 'detail') updateComposerMode();
     document.body.classList.toggle('in-detail', name === 'detail');
     if (name === 'list') setTop('任务列表');
     if (name === 'detail') setTop('任务详情');
@@ -119,20 +137,24 @@
 
   function syncAlerts() {
     if (!state.conn) return;
+    // V4：按当前渠道同步（服务端只覆盖该渠道条目，其他渠道不受影响）
+    const prefix = state.channel + ':';
+    const ids = [...state.watch].filter((k) => k.startsWith(prefix)).map((k) => k.slice(prefix.length));
     apiFetch('/api/alerts/sync', {
       method: 'POST',
-      body: JSON.stringify({ watchlist: [...state.watch] })
+      body: JSON.stringify({ channel: state.channel, watchlist: ids })
     }).catch(() => {});
   }
 
   /** 切换某任务的追踪标记（列表页卡片上的铃铛；存 localStorage + 同步服务端） */
   function toggleWatch(id) {
     if (!id) return;
-    if (state.watch.has(id)) {
-      state.watch.delete(id);
+    const key = watchKey(state.channel, id);
+    if (state.watch.has(key)) {
+      state.watch.delete(key);
       toast('已关闭任务状态邮件提醒');
     } else {
-      state.watch.add(id);
+      state.watch.add(key);
       toast('已开启任务状态邮件提醒');
     }
     lsSet(LS_WATCH, [...state.watch]);
@@ -153,8 +175,9 @@
     if (!g || !g.tasks.length) return;
     let n = 0;
     for (const t of g.tasks) {
-      if (on && !state.watch.has(t.id)) { state.watch.add(t.id); n++; }
-      if (!on && state.watch.has(t.id)) { state.watch.delete(t.id); n++; }
+      const wk = watchKey(state.channel, t.id);
+      if (on && !state.watch.has(wk)) { state.watch.add(wk); n++; }
+      if (!on && state.watch.has(wk)) { state.watch.delete(wk); n++; }
     }
     if (!n) return toast(on ? '该目录任务均已开启追踪' : '该目录任务均已关闭追踪');
     lsSet(LS_WATCH, [...state.watch]);
@@ -197,8 +220,36 @@
 
   // ────────────────────────── 连接逻辑 ──────────────────────────
 
+  // 外壳版本自检：与 /health.shellVer（lib/localApi.js）不一致 → 清缓存 + 注销 SW + 强刷一次。
+  // 解决「发版后手机停留在 SW 旧壳」：stale-while-revalidate 首开必然旧版，极端情况旧 SW 滞留更久。
+  // sessionStorage 防循环：每个标签会话最多自动强刷一次。
+  const SHELL_VER = 'v22';
+  async function shellCheck() {
+    try {
+      if (!location.protocol.startsWith('http')) return;
+      const r = await fetch('/health', { cache: 'no-store' });
+      if (!r.ok) return;
+      const j = await r.json();
+      if (j.shellVer && j.shellVer !== SHELL_VER && !sessionStorage.getItem('shellReloaded')) {
+        sessionStorage.setItem('shellReloaded', '1');
+        try {
+          if (window.caches) {
+            const keys = await caches.keys();
+            await Promise.all(keys.map((k) => caches.delete(k)));
+          }
+          if (navigator.serviceWorker) {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(regs.map((x) => x.unregister()));
+          }
+        } catch (_) {}
+        location.reload();
+      }
+    } catch (_) { /* 离线跳过 */ }
+  }
+
   async function boot() {
     bind();
+    shellCheck();
 
     // 扫码进入：URL 含 ?code=，用当前站点地址自动配对
     const params = new URLSearchParams(location.search);
@@ -238,21 +289,118 @@
     }
   }
 
-  /** ACP 连接状态 → 列表页顶部提示条（爱思办公未启动时置顶提示，恢复后自动隐藏） */
+  /** 当前详情渠道是否支持发消息（渠道未注册时默认展示，保持旧行为） */
+  function canSendCurrent() {
+    const ch = state.currentChannel || state.channel;
+    const cur = state.channels.find((c) => c.channel === ch);
+    return !cur || cur.canSend !== false;
+  }
+
+  /** 当前详情渠道的发送方式提示（/health sendHint 透传；渠道未注册用兜底文案） */
+  function sendHintCurrent() {
+    const ch = state.currentChannel || state.channel;
+    const cur = state.channels.find((c) => c.channel === ch);
+    return (cur && cur.sendHint) || '该渠道暂不支持直接注入指令：已复制到剪贴板，请切换到对应应用粘贴发送';
+  }
+
+  /** 按渠道 canSend 切换输入栏形态：直接发送 vs 复制指令转交（进详情页/渠道注册表更新时调用） */
+  function updateComposerMode() {
+    const sendable = canSendCurrent();
+    $('#msg-input').placeholder = sendable
+      ? '发消息给这个任务，如：同意 / 继续 / 修改建议…'
+      : '该渠道暂不支持直接注入，点「复制指令」后到对应应用粘贴发送';
+    $('#btn-send').textContent = sendable ? '发送' : '复制指令';
+  }
+
+  /** 剪贴板写入：优先 navigator.clipboard（需 HTTPS 安全上下文），局域网 http 用 execCommand 兜底 */
+  async function copyText(t) {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(t);
+        return true;
+      }
+    } catch (_) { /* 继续走兜底 */ }
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = t;
+      ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed;top:-999px;left:-999px;opacity:0';
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, t.length);
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /** ACP/渠道健康 → 渠道注册表 + Tab 渲染 + 列表页顶部提示条（离线保持现状） */
   async function checkAcp() {
     try {
       const r = await fetch((state.conn && state.conn.base || '') + '/health', { cache: 'no-store' });
       if (r.ok) {
         const j = await r.json();
         state.acpConnected = !!j.acpConnected;
-        renderAcpBanner();
+        state.channels = Array.isArray(j.channels) ? j.channels : [];
+        // 当前 Tab 不在注册表（渠道被关闭/降级移除）→ 回退第一个可用渠道
+        if (state.channels.length && !state.channels.some((c) => c.channel === state.channel)) {
+          state.channel = state.channels[0].channel;
+          state.tasks = [];
+          renderList();
+          loadList();
+        }
+        renderTabs();
+        renderBanner();
+        // 详情页停留期间渠道注册表更新（如 CLI 探测结果变化）→ 重算输入栏形态
+        if (!$('#view-detail').classList.contains('hidden')) updateComposerMode();
+        prefetchOtherChannels(); // 渠道注册表就绪后补一次预取（首屏 loadList 时 channels 可能未到）
       }
     } catch (_) { /* 离线：保持现状 */ }
   }
 
-  function renderAcpBanner() {
+  /** 顶部提示条：按当前渠道显示「数据源不可用」（渠道注册表为空时回退 agnes ACP 状态） */
+  function renderBanner() {
     const el = $('#acp-banner');
-    if (el) el.classList.toggle('hidden', state.acpConnected !== false);
+    if (!el) return;
+    const cur = state.channels.find((c) => c.channel === state.channel) || null;
+    const bad = cur ? cur.ok === false : state.acpConnected === false;
+    el.classList.toggle('hidden', !bad);
+    if (bad) {
+      el.innerHTML = cur && cur.channel !== 'agnes'
+        ? `⚠ 暂时取不到 ${esc(cur.displayName)} 的任务数据（本地数据源不可读或应用未运行）。桥接服务会自动恢复，无需重启。`
+        : '⚠ 未检测到爱思办公进程，取不到任务数据。请在电脑上启动爱思办公桌面应用，桥接服务会自动连接，无需重启。';
+    }
+  }
+
+  /** 渠道 Tab：按接入渠道显示（V4.1：勾几个显示几个，只勾一个也显示标签页）；带在线状态点 */
+  function renderTabs() {
+    const el = $('#ch-tabs');
+    if (!el) return;
+    if (!state.channels || state.channels.length < 1) {
+      el.classList.add('hidden');
+      el.innerHTML = '';
+      return;
+    }
+    el.classList.remove('hidden');
+    el.innerHTML = state.channels.map((c) =>
+      `<button class="ch-tab${c.channel === state.channel ? ' on' : ''}" data-ch="${esc(c.channel)}" type="button">` +
+      `<i class="dot ${c.ok ? 'ok' : 'bad'}"></i>${esc(c.displayName)}</button>`
+    ).join('');
+  }
+
+  /** 切换渠道 Tab：优先展示该渠道内存缓存（秒显），再静默刷新对齐最新 */
+  function switchChannel(ch) {
+    if (!ch || ch === state.channel) return;
+    state.channel = ch;
+    state.expandedGroups.clear();
+    const cached = state.tasksByCh.get(ch);
+    state.tasks = cached ? cached.slice() : [];
+    renderTabs();
+    renderBanner();
+    renderList();
+    loadList(true);
   }
 
   async function autoPair(base, code) {
@@ -296,51 +444,88 @@
     reconcileWatch(); // 服务端为追踪清单唯一真源：进看板先拉取对齐本地副本（替代旧的盲目全量覆盖推送，防止旧副本冲掉其他设备的改动）
   }
 
-  /** 与服务端对齐追踪清单：拉取服务端清单覆盖本地（服务端真源），拉取失败（离线）则保留本地不推送 */
+  /** 与服务端对齐追踪清单：拉取全渠道二元组清单重建本地键集合（服务端真源），失败（离线）保留本地不推送 */
   async function reconcileWatch() {
     try {
       const r = await apiFetch('/api/alerts/watchlist');
       if (r.status === 401) return authLost();
       if (!r.ok) return;
       const j = await r.json();
-      state.watch = new Set((j.watchlist || []).map(String));
+      const list = Array.isArray(j.watchlist) ? j.watchlist : [];
+      // 兼容两种元素：V4 二元组 {channel,taskId}；旧桥接纯 id（=agnes）
+      state.watch = new Set(list.map((e) => (e && typeof e === 'object')
+        ? watchKey(e.channel || 'agnes', e.taskId)
+        : watchKey('agnes', e)));
       lsSet(LS_WATCH, [...state.watch]);
       renderList(); // 用服务端状态重绘铃铛（即使 loadList 已渲染，这里保证追踪标记一致）
     } catch (_) { /* 离线：保留本地清单，不做破坏性覆盖 */ }
   }
 
-  async function loadList(silent) {
+  async function loadList(silent, fresh) {
+    const ch = state.channel; // 快照当前渠道：响应回来若已切走，只更新缓存不覆盖渲染
     try {
-      const r = await apiFetch('/api/tasks');
+      // fresh=1 强制服务端实拉（下拉/手动刷新）；默认走服务端快照（预热数据，秒回）
+      const r = await apiFetch('/api/tasks?channel=' + encodeURIComponent(ch) + (fresh ? '&fresh=1' : ''));
       if (r.status === 401) return authLost();
       if (!r.ok) {
         if (r.status === 503) {
-          // ACP 未连接（爱思办公未启动）：空看板 + 顶部提示条，不弹错误
-          state.tasks = [];
-          renderList();
-          checkAcp();
+          // 数据源未连接（如爱思办公未启动）：有内存缓存则保留旧列表，否则空看板 + 顶部提示条
+          if (state.channel === ch) {
+            state.tasks = state.tasksByCh.get(ch) || [];
+            renderList();
+            checkAcp();
+          }
           return;
         }
         throw new Error('HTTP ' + r.status);
       }
       const j = await r.json();
-      state.tasks = j.tasks || [];
+      // 打渠道标记（本地字段）：WS 事件按渠道门控、缓存按渠道隔离都靠它区分
+      const tasks = (j.tasks || []).map((t) => Object.assign({}, t, { _ch: ch }));
+      state.tasksByCh.set(ch, tasks); // 写入该渠道内存缓存：下次切回秒显
+      if (state.channel !== ch) return; // 期间已切走：仅更新缓存，不干扰当前渠道渲染
+      state.tasks = tasks;
       renderList();
       checkAcp();
-      try { localStorage.setItem(LS_CACHE, JSON.stringify(state.tasks)); } catch (_) {}
+      try { localStorage.setItem(LS_CACHE, JSON.stringify({ ch, tasks: state.tasks })); } catch (_) {}
+      prefetchOtherChannels();
     } catch (e) {
+      if (state.channel !== ch) return;
       if (!silent) toast('加载失败：' + (e.name === 'AbortError' ? '连接超时' : e.message));
       if (!state.tasks.length) {
-        // 离线兜底：展示最后缓存列表
+        // 离线兜底：展示同渠道的最后缓存列表（旧格式数组 = agnes）
         try {
-          const cached = JSON.parse(localStorage.getItem(LS_CACHE) || '[]');
-          if (cached.length) {
-            state.tasks = cached;
+          const cached = JSON.parse(localStorage.getItem(LS_CACHE) || 'null');
+          const arr = Array.isArray(cached)
+            ? (ch === 'agnes' ? cached : [])
+            : (cached && cached.ch === ch ? cached.tasks : []);
+          if (arr.length) {
+            state.tasks = arr;
             renderList();
             toast('网络异常，展示缓存列表');
           }
         } catch (_) {}
       }
+    }
+  }
+
+  /** 后台静默预取其他渠道列表（当前渠道加载完成后触发）：切 Tab 时秒显 */
+  const _prefetching = new Set();
+  function prefetchOtherChannels() {
+    if (!state.channels || state.channels.length < 2) return;
+    for (const c of state.channels) {
+      const ch = c.channel;
+      if (ch === state.channel || state.tasksByCh.has(ch) || _prefetching.has(ch)) continue;
+      _prefetching.add(ch);
+      apiFetch('/api/tasks?channel=' + encodeURIComponent(ch))
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => {
+          if (j && Array.isArray(j.tasks)) {
+            state.tasksByCh.set(ch, j.tasks.map((t) => Object.assign({}, t, { _ch: ch })));
+          }
+        })
+        .catch(() => {})
+        .finally(() => _prefetching.delete(ch));
     }
   }
 
@@ -371,7 +556,7 @@
 
   function taskCardHtml(t) {
     const cls = (STATUS[t.status] || { cls: 'unknown' }).cls;
-    const on = state.watch.has(t.id);
+    const on = state.watch.has(watchKey(state.channel, t.id));
     return `<div class="card ${esc(cls)}" data-id="${esc(t.id)}">
       <div class="row1"><span class="title">${esc(t.title)}</span>${badge(t.status)}<button class="watch-btn${on ? ' on' : ''}" data-watch="${esc(t.id)}" type="button" title="${on ? '已开启任务状态邮件提醒' : '任务状态邮件提醒'}">🔔</button></div>
       <div class="meta"><span>${esc(fmtTime(t.createdAt))}</span></div>
@@ -431,6 +616,7 @@
 
   function openDetail(id) {
     state.currentId = id;
+    state.currentChannel = state.channel; // 快照详情所属渠道（Tab 不会在详情页切换，双保险）
     state.detail = null;
     showView('detail');
     renderDetail();
@@ -445,7 +631,7 @@
     if (!force && Date.now() - lastDetailAt < 1500) return; // 前端节流
     lastDetailAt = Date.now();
     try {
-      const r = await apiFetch('/api/tasks/' + encodeURIComponent(id));
+      const r = await apiFetch('/api/tasks/' + encodeURIComponent(id) + '?channel=' + encodeURIComponent(state.currentChannel));
       if (r.status === 401) return authLost();
       if (r.status === 404) { toast('任务不存在'); return; }
       if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -506,7 +692,7 @@
       const fi = list.findIndex((m) => m.role === 'user');
       if (fi >= 0) {
         // 默认收起（伸缩门）：长指令不占屏；点击展开后卡片内可滚动查看全文
-        firstHtml = `<div class="chat-first collapsed" onclick="this.classList.toggle('collapsed')"><div class="first-label"><span class="fold"></span>任务指令（第一条）</div>${msgHtml(list[fi])}</div>`;
+        firstHtml = `<div class="chat-first collapsed" onclick="this.classList.toggle('collapsed')"><div class="first-label"><span class="fold"></span>任务指令（第一条）</div><div class="first-body">${msgHtml(list[fi])}</div></div>`;
         list = list.filter((_, idx) => idx !== fi);
       }
       body = list.length
@@ -658,9 +844,9 @@
     </div>`;
   }
 
-  /** 当前视图静默刷新（轮询 / 手动刷新时使用） */
+  /** 当前视图静默刷新（轮询 / 手动刷新时使用）；列表走 fresh=1 直拉最新 */
   function refreshCurrent(silent) {
-    if ($('#view-detail').classList.contains('hidden')) loadList(silent);
+    if ($('#view-detail').classList.contains('hidden')) loadList(silent, true);
     else loadDetail(silent);
   }
 
@@ -751,6 +937,9 @@
 
   function onTaskUpdate(t) {
     if (!t || !t.id) return;
+    // V4：WS 实时事件目前仅来自 agnes 渠道（桥接只接线了 agnes 的变化回调），
+    // 其他渠道 Tab 不消费，避免把 agnes 任务混进当前渠道列表
+    if (state.channel !== 'agnes') return;
     const i = state.tasks.findIndex((x) => x.id === t.id);
     if (i >= 0) state.tasks[i] = Object.assign({}, state.tasks[i], t);
     else state.tasks.unshift(t);
@@ -761,6 +950,7 @@
   }
 
   function onStepUpdate(taskId) {
+    if (state.channel !== 'agnes') return; // 同 onTaskUpdate：WS 事件仅 agnes
     // 工具调用有更新（对话中的「已处理」块）→ 静默拉取最新详情
     if (state.currentId === taskId && !$('#view-detail').classList.contains('hidden')) loadDetail(true);
   }
@@ -792,7 +982,7 @@
       startY = null;
       if (armed) {
         $('#ptr-label').textContent = '刷新中…';
-        loadList(true).then(() => { $('#ptr-label').textContent = '下拉刷新'; });
+        loadList(true, true).then(() => { $('#ptr-label').textContent = '下拉刷新'; });
       }
     }, { passive: true });
   }
@@ -833,26 +1023,37 @@
     window.addEventListener('resize', syncTopbarH); // 旋转/分屏时重算钉住区吸附位置
 
     // V2：详情页发消息（向 AI 任务发送确认/指令/修改建议）
+    // V4.2：canSend=false 渠道（如 Trae / CLI 未就绪的 WorkBuddy）→「复制指令」转交：
+    // 不请求后端，写入剪贴板后按渠道 sendHint 引导用户去对应应用粘贴发送
     $('#composer').addEventListener('submit', async (e) => {
       e.preventDefault();
       const input = $('#msg-input');
       const text = (input.value || '').trim();
       if (!text || !state.currentId) return;
       const btn = $('#btn-send');
+      if (!canSendCurrent()) {
+        if (await copyText(text)) {
+          input.value = '';
+          toast(sendHintCurrent(), 4200);
+        } else {
+          toast('复制失败：文本已保留在输入框，请长按全选手动复制', 4200);
+        }
+        return;
+      }
       btn.disabled = true;
       input.disabled = true;
       try {
         const r = await apiFetch('/api/tasks/' + encodeURIComponent(state.currentId) + '/messages', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text }),
+          body: JSON.stringify({ text, channel: state.currentChannel }),
           timeoutMs: 20000 // 后端需等 ACP 确认（约 8 秒），普通 5 秒超时会在中途取消请求
         });
         const j = await r.json().catch(() => ({}));
         if (r.status === 401) return authLost();
         if (!r.ok) throw new Error(j.error && j.error.message ? j.error.message : 'HTTP ' + r.status);
         input.value = '';
-        toast('已发送，AI 正在处理…');
+        toast(j.pending ? '指令已受理，后台执行中，回复稍后回显…' : '已发送，AI 正在处理…');
         loadDetail(true, true); // 立即刷新，用户消息会经实时通知回到对话流
       } catch (err) {
         // AbortError（请求被超时取消）与网络错误给用户能看懂的中文提示
@@ -875,6 +1076,12 @@
 
     $('#btn-refresh').addEventListener('click', () => refreshCurrent(false));
     $('#btn-expand-all').addEventListener('click', toggleExpandAll);
+
+    // V4：渠道 Tab 切换（仅多渠道时渲染；切渠道 = 清列表按新渠道重拉）
+    $('#ch-tabs').addEventListener('click', (e) => {
+      const t = e.target.closest('[data-ch]');
+      if (t) switchChannel(t.getAttribute('data-ch'));
+    });
 
     // 列表点击：文件夹头 → 展开/收起；任务卡 → 详情（事件委托）
     $('#task-list').addEventListener('click', (e) => {

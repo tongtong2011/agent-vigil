@@ -32,6 +32,7 @@ const AlertManager = require('./lib/alerts');
 const TunnelManager = require('./lib/tunnel');
 const WecomNotifier = require('./lib/wecom');
 const MailNotifier = require('./lib/mailer');
+const { createAdapters } = require('./lib/adapters');
 
 const WEB_DIR = path.join(__dirname, 'web');
 
@@ -99,9 +100,14 @@ async function main() {
     log('warn', '└──────────────────────────────────────────────');
   }
 
+  // V4 多渠道适配器注册表：agnes 包装上面的 official（零回归）；
+  // workbuddy / trae（本地文件直读）在数据根存在时自动接入，单个渠道失败不影响其他渠道
+  const adapters = createAdapters({ cfg, official, log });
+  await adapters.initAll();
+
   // V3 任务告警：手机端同步开关/追踪清单 → 定时统计邮件 + 阻塞（异常/待确认）即时告警
   const alerts = new AlertManager({
-    cfg, official,
+    cfg, official, adapters,
     getMailer: () => mailer,   // getter：故障转移/向导热重建后拿最新实例
     // 看板链接带当前配对码：未配对设备（如收到告警邮件的手机）点击即自动配对进入，
     // 不必停在配对页；已配对设备侧会忽略 code 直接进（见 app.js 处理）
@@ -125,21 +131,23 @@ async function main() {
     lastModified: true,
     setHeaders: (res) => res.setHeader('Cache-Control', 'private, no-cache, max-age=0')
   }));
-  app.use(createLocalApi(cfg, official, pair, alerts));
+  app.use(createLocalApi(cfg, official, pair, alerts, adapters));
   // V2 配置向导：仅允许本机 127.0.0.1 访问（模块内有安全门），页面 /setup.html 走静态托管
   app.use(createSetupApi({
-    cfg, official, tunnel, pair,
+    cfg, official, tunnel, pair, adapters,
     getPairInfo,
     apply: applySetupChanges,
     log
   }));
   // V2 手机远程配置（页面 /remote.html 静态托管；接口令牌鉴权，仅低风险操作）
   app.use(createRemoteApi({
-    cfg, log,
+    cfg, log, adapters,
     getToken: () => remoteToken,
     getMailer: () => mailer,
     rebuildMailer: () => { mailer = new MailNotifier(cfg, logf); return mailer; },
-    kickPush
+    kickPush,
+    apply: applySetupChanges, // 非凭据设置（告警/TTL/隧道）保存后向导同款热应用
+    tunnel
   }));
 
   app.use((req, res) => {
@@ -232,6 +240,8 @@ async function main() {
       log('info', '[隧道] 已按新配置关闭（仅局域网可用）');
     }
     log('info', `[向导] 热应用完成（邮件: ${mailer.describe()}；企微: ${wecom.describe()}；配对码有效期 ${Math.round(pair.ttlMs / 60000)} 分钟）`);
+    // V4.1 渠道勾选变化 → 热接入/停用（新启用补初始化、停用清快照），再重建告警定时器
+    adapters.applyChannels().catch((e) => log('warn', `[适配器] 渠道启停热应用失败: ${e.message}`));
     alerts.applyConfig(); // V3：定时统计间隔可能被修改，重建定时器
     // 保存推送配置后立即推一次（向导完成页展示的地址/配对码同步进邮箱；
     // 旧码仍有效则复用，无需等它过期重发）
@@ -462,6 +472,7 @@ async function main() {
 
   process.on('SIGINT', () => {
     console.log('\n已停止桥接服务');
+    adapters.closeAll();
     tunnel.stop();
     process.exit(0);
   });

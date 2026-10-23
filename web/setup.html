@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>配置向导 · agent-vigil</title>
+  <title>配置中心 · AgentVigil</title>
   <meta name="robots" content="noindex, nofollow" />
   <style>
     :root {
@@ -24,13 +24,13 @@
     header p { margin: 4px 0 0; font-size: 13px; opacity: .85; }
     .wrap { max-width: 640px; margin: 0 auto; padding: 0 16px 40px; }
 
-    /* 步骤条 */
-    .steps { display: flex; gap: 4px; margin: 18px 0 14px; }
-    .steps span {
-      flex: 1; height: 5px; border-radius: 3px; background: #dbe3ef; font-size: 0;
+    /* Tab 导航（配置中心：每个大配置项一个 Tab，各自独立保存） */
+    .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 16px; }
+    .tab-btn {
+      padding: 8px 15px; border-radius: 999px; border: 1.5px solid var(--line);
+      background: #fff; color: var(--text); font-size: 13.5px; font-weight: 600; cursor: pointer;
     }
-    .steps span.on { background: var(--brand); }
-    .step-label { font-size: 12.5px; color: var(--muted); margin-bottom: 12px; }
+    .tab-btn.on { background: var(--brand); border-color: var(--brand); color: #fff; }
 
     .card {
       background: var(--card); border: 1px solid var(--line);
@@ -67,8 +67,6 @@
     .btn:disabled { opacity: .55; cursor: default; }
     .btn.ghost { background: #eef2f7; color: var(--text); }
     .btn.warn { background: var(--warn); }
-    .nav { display: flex; gap: 10px; margin-top: 6px; }
-    .nav .btn { flex: 1; padding: 13px; font-size: 15.5px; }
 
     .hint {
       background: #f0f5ff; border-radius: 10px; padding: 12px 14px;
@@ -82,6 +80,9 @@
     .msg { font-size: 13px; margin: 10px 0 0; display: none; padding: 10px 12px; border-radius: 9px; }
     .msg.ok { display: block; background: #ecfdf3; color: var(--ok); }
     .msg.err { display: block; background: #fdecec; color: var(--err); word-break: break-all; }
+
+    .save-bar { margin-top: 16px; }
+    .save-bar .btn { width: 100%; padding: 13px; font-size: 15.5px; }
 
     .stat { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 8px 0; }
     .stat .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
@@ -118,44 +119,94 @@
     }
     .seg-btn span { display: block; font-size: 11.5px; font-weight: 400; color: var(--muted); margin-top: 2px; }
     .seg-btn.on { border-color: var(--brand); background: #eff6ff; color: var(--brand-dark); }
+
+    /* 渠道 chip 勾选条（紧凑：20 个渠道也只占两三行）+ 勾选后才出现的配置块 */
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 6px; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 7px; padding: 8px 14px;
+      border: 1.5px solid var(--line); border-radius: 999px; background: #fff;
+      font-size: 13.5px; font-weight: 600; cursor: pointer; user-select: none;
+    }
+    .chip input { width: 16px; height: 16px; margin: 0; accent-color: var(--brand); cursor: pointer; }
+    .chip.on { border-color: var(--brand); background: #eff6ff; color: var(--brand-dark); }
+    .ch-block { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px 6px; margin: 10px 0; background: #fafbfe; }
+    .ch-name { font-size: 14px; font-weight: 700; margin: 2px 0 4px; }
+    .quick-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+    .quick-nav .btn { padding: 9px 14px; font-size: 13px; }
   </style>
 </head>
 <body>
 <header>
   <div class="wrap">
-    <h1>配置向导</h1>
-    <p>首次部署引导 · 所有账号都使用你自己的，配置只保存在你电脑的 config.json</p>
+    <h1>配置中心</h1>
+    <p>每个分类一个页签、独立保存，保存后立即生效（无需重启） · 所有配置只保存在你电脑的 config.json</p>
   </div>
 </header>
 <div class="wrap">
-  <div class="steps" id="steps-bar"><span></span><span></span><span></span><span></span><span></span></div>
-  <div class="step-label" id="step-label">第 1 步，共 5 步</div>
+  <nav class="tabs" id="tabs-bar">
+    <button type="button" class="tab-btn on" data-tab="1" onclick="switchTab(1)">首页</button>
+    <button type="button" class="tab-btn" data-tab="2" onclick="switchTab(2)">邮箱推送</button>
+    <button type="button" class="tab-btn" data-tab="3" onclick="switchTab(3)">公网访问</button>
+    <button type="button" class="tab-btn" data-tab="4" onclick="switchTab(4)">公共配置</button>
+    <button type="button" class="tab-btn" data-tab="5" onclick="switchTab(5)">渠道配置</button>
+    <button type="button" class="tab-btn" data-tab="6" onclick="switchTab(6)">看板与配对</button>
+  </nav>
 
-  <!-- ───────── 第 1 步：欢迎 ───────── -->
-  <section class="step" data-step="1">
+  <!-- ───────── Tab 1：首页（介绍 / 状态 / 连接手机） ───────── -->
+  <section class="tab" data-tab="1">
     <div class="card">
-      <h2>欢迎使用 agent-vigil（Agent任务看板与监控）</h2>
-      <p class="desc">这个向导帮你在 3 分钟内完成所有基础服务配置。全程免费、无需企业资质，也不会用到任何第三方的账号。</p>
+      <h2>欢迎使用 agent-vigil</h2>
+      <p class="desc">这是 agent-vigil 的配置中心：手机上看 AI 任务的看板与监控，配置只保存在你自己电脑的 config.json。全程免费、无需企业资质，也不会用到任何第三方的账号。</p>
       <ul>
-        <li><b>任务看板及配置地址推送</b>（推荐）：公网隧道不定时失效、地址重建后会变化，届时自动把新地址发到你邮箱</li>
-        <li><b>公网隧道</b>（推荐）：手机不在家也能访问看板（Cloudflare 免费隧道）</li>
-        <li><b>邮件告警</b>：任务出现异常/等待确认时即时收提醒邮件，也可定时收任务汇总</li>
+        <li><b>邮箱推送</b>：公网隧道不定时失效、地址重建后会变化，届时自动把新看板地址发到你邮箱</li>
+        <li><b>公网访问</b>（推荐）：手机不在家也能访问看板（Cloudflare 免费隧道）</li>
+        <li><b>渠道与告警</b>：接入 Agent 渠道；任务出现异常/等待确认时即时收提醒邮件，也可定时收任务汇总</li>
       </ul>
       <div class="hint">
-        📋 你只需要准备：<b>一个常用邮箱</b>（QQ / 163 / Gmail 均可）。
+        📋 首次部署你只需要准备：<b>一个常用邮箱</b>（QQ / 163 / Gmail 均可）。
         我们会引导你在邮箱设置里生成一个「SMTP 授权码」——它不是邮箱密码，
         只用于本服务发通知邮件给你自己，随时可以在邮箱设置里撤销。
       </div>
       <div class="hint" style="background:#f8fafc;color:#64748b;">
         🔒 隐私说明：所有配置保存在你本机 <code>config.json</code>，不会上传到任何服务器；
-        配置向导页面也只允许在这台电脑上打开（外部访问会被拒绝）。
+        配置页面也只允许在这台电脑上打开（外部访问会被拒绝）。
       </div>
     </div>
-    <div class="nav"><button class="btn" onclick="go(2)">开始配置 →</button></div>
+
+    <div class="card">
+      <h2>当前状态</h2>
+      <div class="stat" id="st-mail"><span class="dot bad"></span>检测中…</div>
+      <div class="stat" id="st-tunnel"><span class="dot bad"></span>检测中…</div>
+      <div class="stat" id="st-channels"><span class="dot bad"></span>检测中…</div>
+      <div class="stat" id="st-watch"><span class="dot ok"></span>检测中…</div>
+      <div class="quick-nav" style="margin-top:12px;">
+        <button type="button" class="btn ghost" onclick="switchTab(2)">📨 去配置邮箱推送</button>
+        <button type="button" class="btn ghost" onclick="switchTab(3)">🌐 去配置公网访问</button>
+        <button type="button" class="btn ghost" onclick="switchTab(4)">⏱ 去配置公共配置</button>
+        <button type="button" class="btn ghost" onclick="switchTab(5)">🧩 去配置渠道</button>
+        <button type="button" class="btn ghost" onclick="switchTab(6)">📱 去配置看板与配对</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>连接手机</h2>
+      <p class="desc">手机<b>扫码</b>自动连接看板，或打开下方地址后手动输入配对码。配对码已同步推送到你配置的邮箱，地址或配对码变动时会自动重推。</p>
+      <div class="qrbox">
+        <img id="qr-img" alt="配对二维码" />
+        <div class="code-big" id="pair-code">------</div>
+        <p class="desc" id="pair-seq" style="margin:4px 0 0;font-size:12px;color:#888;"></p>
+      </div>
+      <div class="urlbox" id="url-main"></div>
+      <div class="urlbox" id="url-lan"></div>
+      <div class="hint" style="margin-top:14px;">
+        ✅ 以后随时可以改配置：切到上方对应页签修改后单独保存，或编辑 <code>config.json</code>；
+        也可以重新打开本页（<code>http://127.0.0.1:<span id="port-show">8787</span>/setup.html</code>）
+      </div>
+    </div>
   </section>
 
-  <!-- ───────── 第 2 步：任务看板及配置地址推送 ───────── -->
-  <section class="step hidden" data-step="2">
+  <!-- ───────── Tab 2：邮箱推送（任务看板及配置地址推送） ───────── -->
+  <section class="tab hidden" data-tab="2">
     <div class="card">
       <h2>任务看板及配置地址推送 <span class="pill" id="mail-stat">检测中…</span></h2>
       <p class="desc">接入的 Cloud 桥接服务（免费公网隧道）会不定时失效，重建后任务看板地址与配置地址都会变化——届时会通过下方的邮箱配置，把新地址及时推送给你，手机扫码即可重新连上看板。</p>
@@ -224,14 +275,24 @@
         <div class="msg" id="mail-msg"></div>
       </div>
     </div>
-    <div class="nav">
-      <button class="btn ghost" onclick="go(1)">← 上一步</button>
-      <button class="btn" onclick="go(3)">下一步 →</button>
+
+    <div class="card">
+      <details class="adv" style="margin-top:0;">
+        <summary>高级：企业微信推送（可选，需要企业微信管理员权限，一般用不到）</summary>
+        <label>企业ID（corpId）</label><input type="text" id="w-corp" placeholder="留空 = 不启用" />
+        <label>应用 Secret</label><input type="password" id="w-secret" placeholder="留空 = 不启用" autocomplete="new-password" />
+        <label>AgentId</label><input type="number" id="w-agent" placeholder="0" />
+      </details>
+    </div>
+
+    <div class="save-bar">
+      <button class="btn" id="btn-save-mail" onclick="saveMailer()">💾 保存邮箱推送配置</button>
+      <div class="msg" id="save-msg-mail"></div>
     </div>
   </section>
 
-  <!-- ───────── 第 3 步：公网隧道 ───────── -->
-  <section class="step hidden" data-step="3">
+  <!-- ───────── Tab 3：公网访问（隧道） ───────── -->
+  <section class="tab hidden" data-tab="3">
     <div class="card">
       <h2>公网隧道 <span class="pill" id="tunnel-stat">检测中…</span></h2>
       <p class="desc">启动 Cloudflare 免费隧道后，手机在公司、地铁等任何网络都能打开看板；不开也可以，手机与电脑连同一 WiFi 就能用。</p>
@@ -273,85 +334,79 @@
         <label style="margin-top:16px;">cloudflared 程序路径（留空 = 自动找项目 tools/ 目录和 PATH）</label>
         <input type="text" id="t-path" placeholder="自动查找" />
       </div>
-    </div>
-    <div class="nav">
-      <button class="btn ghost" onclick="go(2)">← 上一步</button>
-      <button class="btn" onclick="go(4)">下一步 →</button>
+
+      <div class="save-bar">
+        <button class="btn" id="btn-save-tunnel" onclick="saveTunnel()">💾 保存公网访问配置</button>
+        <div class="msg" id="save-msg-tunnel"></div>
+      </div>
     </div>
   </section>
 
-  <!-- ───────── 第 4 步：任务告警 ───────── -->
-  <section class="step hidden" data-step="4">
+  <!-- ───────── Tab 4：渠道与任务告警公共配置 ───────── -->
+  <section class="tab hidden" data-tab="4">
     <div class="card">
-      <h2>任务告警与汇总</h2>
-      <p class="desc">先在手机看板详情页用「🔔 追踪」标记要监控的任务，再在这里开启定时汇总。</p>
+      <h2>渠道与任务告警公共配置</h2>
+      <p class="desc">这里是<b>全渠道统一</b>的节拍设置：所有渠道共用同一个汇总间隔与汇总标题。每个渠道「是否参与汇总 / 是否报警 / 报警标题前缀」在「渠道配置」页按渠道单独设置。</p>
 
-      <label class="switch"><input type="checkbox" id="a-digest" /><span><span class="t">任务汇总（定时统计邮件）</span><br /><span class="s">开启后按下方间隔，把所有被追踪任务的 名称 / 状态 / 最新反馈 汇总成一封表格邮件</span></span></label>
-
-      <label>任务汇总间隔</label>
+      <div class="group-title">任务汇总（全渠道统一）</div>
+      <label>任务汇总间隔（所有渠道同一节拍，启用汇总的渠道合并为一封邮件、按渠道分节）</label>
       <select id="a-interval">
         <option value="30">每 30 分钟汇总一次</option>
         <option value="60" selected>每 1 小时汇总一次</option>
         <option value="120">每 2 小时汇总一次</option>
         <option value="240">每 4 小时汇总一次</option>
       </select>
+      <label>任务汇总邮件标题（全局统一；留空保存会被拦截并自动填回默认「任务汇总邮件」）</label>
+      <input type="text" id="a-digest-title" placeholder="默认值：任务汇总邮件" maxlength="50" />
+      <p class="desc" style="margin-top:2px;">各渠道「是否参与汇总」的开关在「渠道配置」页里按渠道单独配置。</p>
 
-      <label>任务汇总邮件标题（留空 = 默认「任务汇总邮件」）</label>
-      <input type="text" id="a-digest-title" placeholder="任务汇总邮件" maxlength="50" />
+      <div class="save-bar">
+        <button class="btn" id="btn-save-alerts" onclick="saveAlertsCommon()">💾 保存公共配置</button>
+        <div class="msg" id="save-msg-alerts"></div>
+      </div>
+    </div>
+  </section>
 
-      <label class="switch"><input type="checkbox" id="a-alert" /><span><span class="t">单任务报警（阻塞即时通知）</span><br /><span class="s">开启后，被追踪任务出现异常或等待确认（阻塞）时立即发报警邮件；总开关关闭则一律不发</span></span></label>
+  <!-- ───────── Tab 5：渠道独立配置 ───────── -->
+  <section class="tab hidden" data-tab="5">
+    <div class="card">
+      <h2>渠道独立配置</h2>
+      <p class="desc">先在下方勾选要接入的 Agent 渠道（<b>勾上才会出现该渠道的配置项</b>，取消勾选即不接入）。看板按勾选数量显示标签页（只勾一个也显示）；取消勾选的渠道看板不显示、告警不发、数据源不读取，重新勾上立即恢复。</p>
 
-      <label>单任务报警邮件标题公共前缀（留空 = 默认「单任务报警-」）</label>
-      <input type="text" id="a-alert-prefix" placeholder="单任务报警-" maxlength="30" />
-      <p class="desc" style="margin-top:2px;">报警邮件标题 = 该前缀 + 任务名称。需同时满足：任务在手机端「🔔 追踪」标记 + 上方「单任务报警」总开关打开。</p>
+      <div class="group-title">接入渠道（点击勾选）</div>
+      <div class="chips" id="ch-chips"><!-- 渠道勾选 chip（JS 按 /api/setup/status 渲染） --></div>
+      <p class="desc" id="ch-count" style="margin:2px 0 0;"></p>
+
+      <div class="group-title" style="margin-top:18px;">渠道配置项（勾选后动态出现）</div>
+      <div id="ch-blocks"><!-- 勾选的渠道配置块（JS 渲染） --></div>
+
+      <div class="save-bar">
+        <button class="btn" id="btn-save-ch" onclick="saveChannels()">💾 保存渠道配置</button>
+        <div class="msg" id="save-msg-ch"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────── Tab 6：看板与配对 ───────── -->
+  <section class="tab hidden" data-tab="6">
+    <div class="card">
+      <h2>看板与配对</h2>
+      <p class="desc">看板展示与手机配对的全局设置（不分渠道）。</p>
 
       <div class="group-title">配对码有效期</div>
       <label>扫码配对链接的有效时长（<span id="pair-ttl-val">15</span> 分钟）</label>
       <input type="range" id="pair-ttl" min="5" max="120" step="5" oninput="document.getElementById('pair-ttl-val').textContent=this.value" />
-      <p class="desc" style="margin-top:2px;">只影响之后新生成的配对码；电脑端服务重启会作废旧码并自动生成新码推送（一次性设计，防旧链接被外人蹭用）。</p>
+      <p class="desc" style="margin-top:2px;">有效期内同一配对码可重复使用、可配多台设备；服务重启会作废旧码并自动生成新码推送。</p>
 
-      <details class="adv">
-        <summary>高级：企业微信推送（可选，需要企业微信管理员权限，一般用不到）</summary>
-        <label>企业ID（corpId）</label><input type="text" id="w-corp" placeholder="留空 = 不启用" />
-        <label>应用 Secret</label><input type="password" id="w-secret" placeholder="留空 = 不启用" autocomplete="new-password" />
-        <label>AgentId</label><input type="number" id="w-agent" placeholder="0" />
-      </details>
-    </div>
-    <div class="nav">
-      <button class="btn ghost" onclick="go(3)">← 上一步</button>
-      <button class="btn" onclick="go(5)">下一步 →</button>
-    </div>
-  </section>
+      <div class="group-title">看板列表条数上限</div>
+      <label>看板每个渠道最多显示的任务条数（当前 <span id="wb-limit-val">100</span> 条，全渠道统一）</label>
+      <input type="range" id="wb-list-limit" min="100" max="1000" step="50" oninput="document.getElementById('wb-limit-val').textContent=this.value" />
+      <p class="desc" style="margin-top:2px;">按最近更新倒序截断，超出部分只是不进列表、数据不会丢（实际任务量不足时全量显示）。默认范围 100~1000；重度用户可编辑 <code>config.json</code> → <code>board.listLimitMax</code> 调大滑块范围，<code>board.listLimit</code> 也可直接手改为任意值（手改值超出滑块范围时，上方仍显示实际生效值）。</p>
 
-  <!-- ───────── 第 5 步：完成 ───────── -->
-  <section class="step hidden" data-step="5">
-    <div class="card">
-      <h2>保存并连接手机</h2>
-      <p class="desc">点击下方按钮保存全部配置（立即生效，无需重启）。保存后页面会展示连接二维码与配对码。</p>
-      <div id="save-area">
-        <button class="btn" id="btn-save" style="width:100%;padding:14px;font-size:16px;" onclick="saveAll()">💾 保存全部配置</button>
-        <div class="msg" id="save-msg"></div>
+      <div class="save-bar">
+        <button class="btn" id="btn-save-board" onclick="saveBoardPair()">💾 保存看板与配对配置</button>
+        <div class="msg" id="save-msg-board"></div>
       </div>
-      <div id="done-area" class="hidden">
-        <div class="qrbox">
-          <img id="qr-img" alt="配对二维码" />
-          <div class="code-big" id="pair-code">------</div>
-          <p class="desc" id="pair-seq" style="margin:4px 0 0;font-size:12px;color:#888;"></p>
-          <p class="desc">手机<b>扫码</b>自动连接，或打开下方地址后手动输入配对码</p>
-        </div>
-        <div class="urlbox" id="url-main"></div>
-        <div class="urlbox" id="url-lan"></div>
-        <div class="hint" style="margin-top:14px;">
-          ✅ 全部完成！<br />
-          • 配对码已同步推送到你配置的邮箱，手机邮件 App 也能收到<br />
-          • 地址或配对码变动时会自动重推<br />
-          • 以后随时可以改配置：编辑 <code>config.json</code> 或重新打开本页（<code>http://127.0.0.1:<span id="port-show">8787</span>/setup.html</code>）
-        </div>
-      </div>
-    </div>
-    <div class="nav">
-      <button class="btn ghost" onclick="go(4)">← 上一步</button>
-      <span style="flex:1"></span>
     </div>
   </section>
 </div>
@@ -360,24 +415,65 @@
 'use strict';
 const $ = (s) => document.querySelector(s);
 let cur = 1;
-const TOTAL = 5;
+let pairStale = true; // 保存后配对信息可能变化（TTL/隧道地址），回首页时刷新
 
-function go(n) {
+function switchTab(n) {
   cur = n;
-  document.querySelectorAll('.step').forEach((el) => {
-    el.classList.toggle('hidden', Number(el.dataset.step) !== n);
+  document.querySelectorAll('.tab').forEach((el) => {
+    el.classList.toggle('hidden', Number(el.dataset.tab) !== n);
   });
-  document.querySelectorAll('#steps-bar span').forEach((el, i) => {
-    el.classList.toggle('on', i < n);
+  document.querySelectorAll('#tabs-bar .tab-btn').forEach((el) => {
+    el.classList.toggle('on', Number(el.dataset.tab) === n);
   });
-  $('#step-label').textContent = `第 ${n} 步，共 ${TOTAL} 步`;
   window.scrollTo(0, 0);
-  if (n === 3) detectTunnel(); // 进入隧道步时刷新检测结果
+  if (n === 1) refreshHome();      // 首页：刷新状态总览 + 配对信息
+  if (n === 3) detectTunnel();     // 公网访问：刷新隧道检测结果
 }
 
+/* ── 首页：状态总览 + 连接信息 ── */
+function setStat(id, ok, text) {
+  $(id).innerHTML = `<span class="dot ${ok ? 'ok' : 'bad'}"></span>${text}`;
+}
+function renderHomeStatus(st) {
+  const m = st.mailer || {};
+  setStat('#st-mail', m.configured,
+    m.configured ? `邮箱推送：已配置（收件 ${m.to || ''}）` : '邮箱推送：未配置 — 去「邮箱推送」页配置');
+  const t = st.tunnel || {};
+  setStat('#st-tunnel', !!(t.enabled && t.binaryAvailable),
+    t.enabled
+      ? (t.binaryAvailable
+        ? `公网隧道：${t.mode === 'named' ? '固定域名' : '测试隧道 · 重启会变'}${t.url ? ' · ' + t.url : ' · 启动后自动获得地址'}`
+        : '公网隧道：未找到 cloudflared — 去「公网访问」页查看')
+      : '公网隧道：未启用（手机与电脑连同一 WiFi 可访问）');
+  const chs = Object.values(st.channels || {});
+  const en = chs.filter((c) => c.enabled);
+  setStat('#st-channels', en.length > 0,
+    '已接入渠道：' + (en.length ? en.map((c) => c.displayName || '').join('、') : '无 — 去「渠道配置」页勾选'));
+  setStat('#st-watch', true,
+    `追踪任务数：${(st.alerts && st.alerts.watchCount) || 0}（在手机看板详情页用「🔔 追踪」标记）`);
+}
+async function refreshHome() {
+  try {
+    renderHomeStatus(await api('/api/setup/status'));
+  } catch (e) { console.warn(e); }
+  if (!pairStale) return;
+  pairStale = false;
+  try {
+    const info = await api('/api/setup/pair-info');
+    $('#qr-img').src = info.qrDataUrl;
+    $('#pair-code').textContent = info.code;
+    $('#pair-seq').textContent = info.seq ? `第 ${info.seq} 次生成的配对码（与推送邮件中的「第 ${info.seq} 次」对应）` : '';
+    $('#url-main').textContent = (info.public ? '公网地址：' : '局域网地址：') + info.pairUrl;
+    $('#url-lan').textContent = info.lanUrl && info.lanUrl !== info.pairUrl ? '局域网备用：' + info.lanUrl : '';
+  } catch (e) {
+    $('#url-main').textContent = '获取连接信息失败：' + e.message;
+  }
+}
+
+/* ── 公网访问（隧道） ── */
 function toggleTunnel() { $('#tunnel-form').classList.toggle('hidden', !$('#t-enable').checked); }
 
-/* ── V3 双模式：自动测试隧道 / 固定域名命名隧道 ── */
+/* ── 双模式：自动测试隧道 / 固定域名命名隧道 ── */
 let tunnelMode = 'quick';
 function setTunnelMode(m) {
   tunnelMode = m === 'named' ? 'named' : 'quick';
@@ -456,7 +552,7 @@ async function api(path, opts) {
   return j;
 }
 
-/* ── 初始化：拉取当前状态回填表单 ── */
+/* ── 初始化：拉取当前状态回填全部页签的表单 ── */
 (async function init() {
   try {
     const st = await api('/api/setup/status');
@@ -472,12 +568,16 @@ async function api(path, opts) {
     syncPreset();
     if (st.alerts) {
       $('#a-interval').value = String(st.alerts.digestIntervalMinutes || 60);
-      $('#a-digest').checked = !!st.alerts.digestEnabled;
       $('#a-digest-title').value = st.alerts.digestTitle || '';
-      $('#a-alert').checked = !!st.alerts.alertEnabled;
-      $('#a-alert-prefix').value = st.alerts.alertPrefix || '';
       $('#pair-ttl').value = Number(st.pair && st.pair.codeTtlMinutes) || 15;
       document.getElementById('pair-ttl-val').textContent = $('#pair-ttl').value;
+      // 看板列表条数上限（全渠道统一）：滑块范围 = 100 ~ listLimitMax（手改 config 可扩大）；显示值 = 配置实际值
+      const bd = st.board || {};
+      const lmax = Math.max(100, Number(bd.listLimitMax) || 1000);
+      $('#wb-list-limit').max = String(lmax);
+      $('#wb-list-limit').value = String(Math.min(lmax, Math.max(100, Number(bd.listLimit) || 100)));
+      document.getElementById('wb-limit-val').textContent = String(Math.max(100, Number(bd.listLimit) || 100));
+      renderChannelChips(st.channels || {});
     }
     $('#t-enable').checked = st.tunnel.enabled;
     setTunnelMode(st.tunnel.mode === 'named' ? 'named' : 'quick');
@@ -489,9 +589,10 @@ async function api(path, opts) {
   } catch (e) {
     console.warn(e);
   }
+  switchTab(1);
 })();
 
-/* ── 隧道检测 ── */
+/* ── 公网访问：隧道检测 ── */
 let tunnelDetected = null;
 async function detectTunnel() {
   const el = $('#tunnel-detect');
@@ -600,70 +701,155 @@ async function testMail() {
   }
 }
 
-/* ── 保存全部 ── */
-async function saveAll() {
-  $('#btn-save').disabled = true;
-  showMsg('#save-msg', '保存中…', 'ok');
-  const patch = {
+/* ── 渠道独立配置：chip 勾选条 + 勾选后才出现的配置块（数据存 chState，取消再勾不丢编辑值） ── */
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+let chState = {}; // ch -> { enabled, digestEnabled, alertEnabled, alertPrefix, displayName }
+function renderChannelChips(chs) {
+  chState = {};
+  Object.keys(chs).forEach((ch) => {
+    const c = chs[ch] || {};
+    chState[ch] = {
+      enabled: !!c.enabled,
+      digestEnabled: !!c.digestEnabled,
+      alertEnabled: !!c.alertEnabled,
+      alertPrefix: String(c.alertPrefix || ''),
+      displayName: c.displayName || ch
+    };
+  });
+  renderChips();
+  renderChBlocks();
+}
+function updateChCount() {
+  const n = Object.keys(chState).filter((ch) => chState[ch].enabled).length;
+  $('#ch-count').textContent = n ? `已勾选 ${n} 个渠道（看板将显示 ${n} 个标签页）` : '尚未勾选任何渠道（保存前至少要勾一个）';
+}
+function renderChips() {
+  $('#ch-chips').innerHTML = Object.keys(chState).map((ch) => {
+    const s = chState[ch];
+    return `<label class="chip${s.enabled ? ' on' : ''}"><input type="checkbox" class="ch-en" ${s.enabled ? 'checked' : ''} onchange="toggleCh('${esc(ch)}', this.checked, this)" /><span>${esc(s.displayName)}</span></label>`;
+  }).join('');
+  updateChCount();
+}
+function toggleCh(ch, on, el) {
+  chState[ch].enabled = !!on;
+  el.closest('.chip').classList.toggle('on', !!on);
+  renderChBlocks();
+  updateChCount();
+}
+function renderChBlocks() {
+  const box = $('#ch-blocks');
+  const enabled = Object.keys(chState).filter((ch) => chState[ch].enabled);
+  if (!enabled.length) {
+    box.innerHTML = '<p class="desc" style="margin:6px 0;">上方勾选渠道后，这里才会出现对应的配置项。</p>';
+    return;
+  }
+  box.innerHTML = enabled.map((ch) => {
+    const s = chState[ch];
+    const defPrefix = ch === 'agnes' ? '默认值：单任务报警-' : `默认值：[${esc(s.displayName)}] 单任务报警-`;
+    return `
+      <div class="ch-block" data-ch="${esc(ch)}">
+        <div class="ch-name">${esc(s.displayName)} <span class="pill">已接入</span></div>
+        <label class="switch"><input type="checkbox" class="ch-digest" ${s.digestEnabled ? 'checked' : ''} onchange="chState['${esc(ch)}'].digestEnabled=this.checked" /><span><span class="t">任务汇总（该渠道）</span><br /><span class="s">该渠道被追踪任务进入汇总邮件（按全局间隔、按渠道分节）</span></span></label>
+        <label class="switch"><input type="checkbox" class="ch-alert" ${s.alertEnabled ? 'checked' : ''} onchange="chState['${esc(ch)}'].alertEnabled=this.checked" /><span><span class="t">单任务报警（该渠道）</span><br /><span class="s">该渠道被追踪任务出现异常/待确认（阻塞）时立即发报警邮件</span></span></label>
+        <label>该渠道报警标题前缀（报警邮件标题 = 前缀 + 任务名；留空 = 用默认）</label>
+        <input type="text" class="ch-prefix" maxlength="30" placeholder="${defPrefix}" value="${esc(s.alertPrefix)}" oninput="chState['${esc(ch)}'].alertPrefix=this.value" />
+      </div>`;
+  }).join('');
+}
+
+/* ── 各页签独立保存（共用 helper：保存 → 标记向导完成 → 提示；后端按白名单部分提交） ── */
+async function saveTab(patch, btnSel, msgSel, okText) {
+  $(btnSel).disabled = true;
+  showMsg(msgSel, '保存中…', 'ok');
+  try {
+    await api('/api/setup/save', { method: 'POST', body: JSON.stringify(patch) });
+    await api('/api/setup/done', { method: 'POST', body: '{}' });
+    showMsg(msgSel, okText, 'ok');
+    pairStale = true; // 保存可能影响配对信息（TTL/隧道地址/推送邮箱），回首页时自动刷新
+  } catch (e) {
+    showMsg(msgSel, '❌ 保存失败：' + e.message, 'err');
+  } finally {
+    $(btnSel).disabled = false;
+  }
+}
+
+/* 邮箱推送 */
+async function saveMailer() {
+  const m = {};
+  if ($('#m-host').value) m.smtpHost = $('#m-host').value;
+  m.smtpPort = Number($('#m-port').value) || 465;
+  m.smtpSecure = $('#m-secure').checked;
+  if ($('#m-user').value) m.user = $('#m-user').value;
+  if ($('#m-pass').value) m.pass = $('#m-pass').value;   // 授权码只在填写时更新
+  if ($('#m-to').value) m.to = $('#m-to').value;
+  m.from = $('#m-from').value;                            // 发件别名（留空 = 同登录邮箱）
+  const patch = { mailer: m };
+  if ($('#w-corp').value || $('#w-secret').value || Number($('#w-agent').value)) {
+    patch.wecom = { corpId: $('#w-corp').value, agentId: Number($('#w-agent').value) || 0 };
+    if ($('#w-secret').value) patch.wecom.corpSecret = $('#w-secret').value;
+  }
+  await saveTab(patch, '#btn-save-mail', '#save-msg-mail', '✅ 邮箱推送配置已保存并立即生效');
+}
+
+/* 公网访问 */
+async function saveTunnel() {
+  await saveTab({
     tunnel: {
       enabled: $('#t-enable').checked,
       cloudflaredPath: $('#t-path').value || '',
       mode: tunnelMode,
       hostname: $('#t-hostname').value.trim(),
       tunnelName: $('#t-tunnelname').value.trim() || 'agnes-board'
-    },
+    }
+  }, '#btn-save-tunnel', '#save-msg-tunnel', '✅ 公网访问配置已保存并立即生效');
+}
+
+/* 公共配置（全渠道统一节拍；标题留空拦截并自动回填默认） */
+async function saveAlertsCommon() {
+  if (!$('#a-digest-title').value.trim()) {
+    $('#a-digest-title').value = '任务汇总邮件';
+    showMsg('#save-msg-alerts', '⚠ 「任务汇总邮件标题」不能留空，已自动填回默认值（说明文字里标注了默认值，可参照修改），请确认后重新保存', 'err');
+    return;
+  }
+  await saveTab({
     alerts: {
       digestIntervalMinutes: Number($('#a-interval').value) || 60,
-      digestEnabled: $('#a-digest').checked,
-      digestTitle: $('#a-digest-title').value.trim(),
-      alertEnabled: $('#a-alert').checked,
-      alertPrefix: $('#a-alert-prefix').value.trim()
-    },
-    pair: { codeTtlMinutes: Number($('#pair-ttl').value) || 15 }
-  };
-  { // 邮件推送为常开主通道（原「启用邮件推送」开关已移除）
-    const m = {};
-    if ($('#m-host').value) m.smtpHost = $('#m-host').value;
-    m.smtpPort = Number($('#m-port').value) || 465;
-    m.smtpSecure = $('#m-secure').checked;
-    if ($('#m-user').value) m.user = $('#m-user').value;
-    if ($('#m-pass').value) m.pass = $('#m-pass').value;   // 授权码只在填写时更新
-    if ($('#m-to').value) m.to = $('#m-to').value;
-    m.from = $('#m-from').value;                            // 发件别名（留空 = 同登录邮箱）
-    patch.mailer = m;
-  }
-  if ($('#w-corp').value || $('#w-secret').value || Number($('#w-agent').value)) {
-    patch.wecom = {
-      corpId: $('#w-corp').value, agentId: Number($('#w-agent').value) || 0
-    };
-    if ($('#w-secret').value) patch.wecom.corpSecret = $('#w-secret').value;
-  }
-  try {
-    await api('/api/setup/save', { method: 'POST', body: JSON.stringify(patch) });
-    await api('/api/setup/done', { method: 'POST', body: '{}' });
-    showMsg('#save-msg', '✅ 配置已保存并立即生效', 'ok');
-    // 展示连接信息（新码会同时推送到邮箱）
-    setTimeout(async () => {
-      $('#save-area').classList.add('hidden');
-      $('#done-area').classList.remove('hidden');
-      try {
-        const info = await api('/api/setup/pair-info');
-        $('#qr-img').src = info.qrDataUrl;
-        $('#pair-code').textContent = info.code;
-        $('#pair-seq').textContent = info.seq ? `第 ${info.seq} 次生成的配对码（与推送邮件中的「第 ${info.seq} 次」对应）` : '';
-        $('#url-main').textContent = (info.public ? '公网地址：' : '局域网地址：') + info.pairUrl;
-        $('#url-lan').textContent = info.lanUrl && info.lanUrl !== info.pairUrl ? '局域网备用：' + info.lanUrl : '';
-      } catch (e) {
-        $('#url-main').textContent = '获取连接信息失败：' + e.message;
-      }
-    }, 800); // 等热应用 + 新码生成
-  } catch (e) {
-    showMsg('#save-msg', '❌ 保存失败：' + e.message, 'err');
-  } finally {
-    $('#btn-save').disabled = false;
-  }
+      digestTitle: $('#a-digest-title').value.trim()
+    }
+  }, '#btn-save-alerts', '#save-msg-alerts', '✅ 公共配置已保存并立即生效');
 }
-go(1);
+
+/* 渠道独立配置（未勾 = enabled:false 不接入；全不勾拦截） */
+async function saveChannels() {
+  const enCount = Object.keys(chState).filter((ch) => chState[ch].enabled).length;
+  if (!enCount) {
+    showMsg('#save-msg-ch', '⚠ 至少要勾选一个接入渠道（全部取消将没有看板数据）', 'err');
+    return;
+  }
+  const chs = {};
+  Object.keys(chState).forEach((ch) => {
+    const s = chState[ch];
+    const cur = { enabled: s.enabled };
+    if (s.enabled) {
+      cur.digestEnabled = s.digestEnabled;
+      cur.alertEnabled = s.alertEnabled;
+      const pfx = String(s.alertPrefix || '').trim();
+      if (pfx) cur.alertPrefix = pfx; // 留空 = 用该渠道默认前缀
+    }
+    chs[ch] = cur;
+  });
+  await saveTab({ channels: chs }, '#btn-save-ch', '#save-msg-ch', `✅ 渠道配置已保存并立即生效（已接入 ${enCount} 个渠道）`);
+}
+
+/* 看板与配对 */
+async function saveBoardPair() {
+  await saveTab({
+    pair: { codeTtlMinutes: Number($('#pair-ttl').value) || 15 },
+    board: { listLimit: Number($('#wb-list-limit').value) || 100 }
+  }, '#btn-save-board', '#save-msg-board', '✅ 看板与配对配置已保存并立即生效（配对码有效期变化会自动重推新码）');
+}
 </script>
 </body>
 </html>
