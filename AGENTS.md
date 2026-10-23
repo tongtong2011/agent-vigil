@@ -9,7 +9,7 @@
 - 定位：**服务层，不是插件**——不改 Agent 工具本身，把多 harness 的任务聚合成「一个看板 + 一个邮箱」
 - 当前版本：**V4.1.0（开发期）**；多渠道适配器架构（V4）：`lib/adapters/`（base 接口 + agnes/workbuddy/trae 三个实现 + index 注册表），`lib/channels.js` 为渠道告警策略单一真源
 - 渠道能力：agnes = ACP 协议可发消息；workbuddy = 本地转录直读 + 进程门禁，V4.1 起 headless CLI 可发消息；trae = 记忆转录直读、**只读**（两态 running/done，不触发即时告警，参与汇总）
-- 告警四态（`lib/alerts.js`）：`running` 正在执行 / `ended` 执行完成 / `failed` 异常 / `waiting` 待确认；阻塞态 = `failed` + `waiting`
+- 告警四态（`lib/alerts.js`）：`running` 正在执行 / `ended` 执行完成 / `failed` 异常 / `waiting` 待确认；阻塞态 = `failed` + `waiting`。**词表映射**：适配器统一任务格式（`lib/adapters/base.js` 的 `task.status`，UI/API/适配器消费）完成态写作 `done`，与 `ended` 同义——`task.status` 永远只用 `running|done|failed|waiting`（判定优先级 running > failed > waiting > done），`ended` 仅是告警引擎内部键，禁止写进 task.status
 - 配置模型（V4.1）：`alerts.digestIntervalMinutes/digestTitle` 与 `board.listLimit/listLimitMax` 全渠道统一；`channels.<ch>` 每渠道仅 `enabled/digestEnabled/alertEnabled/alertPrefix`；旧 config.json 自动迁移
 - License：MIT；Node.js ≥ 18；入口 `bridge.js`，默认端口 8787
 - 关键文档入口：`docs/00-文档导航.md`（找任何文档从这进）

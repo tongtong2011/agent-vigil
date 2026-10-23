@@ -1,6 +1,6 @@
 {
   "name": "agent-vigil",
-  "version": "0.1.0",
+  "version": "4.1.0",
   "private": true,
   "description": "AgentVigil — mobile task board & email alerts for AI agents: watch task status, blockers (failed / waiting-for-confirmation), and scheduled digests across every harness from one board and one inbox. Built-in harnesses (V4 plugin adapters): 爱思办公 Agnes Office (ACP) / WorkBuddy / Trae.",
   "main": "bridge.js",
